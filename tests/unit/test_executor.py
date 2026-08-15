@@ -217,6 +217,33 @@ class TestExecutorRun:
         # 跑后清理仍卸载（铁律 3：样本不留设备）
         assert any(c[0] == "uninstall" for c in runner.calls)
 
+    def test_existing_package_same_version_kept_when_cleanup_disabled(self):
+        """cleanup_uninstall=false + 同版本已装 → 测完保留设备已有应用，不卸载"""
+        runner = FakeRunner()
+        runner.has_package = True
+        runner.installed_version = "100"
+        ex = DynamicExecutor(runner, make_options(cleanup_uninstall=False))
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [], version_code="100")
+        assert result["status"] == "executed"
+        # 不安装（同版本已就绪）、不卸载（保留设备已有应用）
+        assert not any(c[0] == "install" for c in runner.calls)
+        assert not any(c[0] == "uninstall" for c in runner.calls)
+        assert result["kept_installed"] is True
+        # 代理仍无条件清除
+        assert any(c[0] == "clear_proxy" for c in runner.calls)
+        assert any("keeping" in n for n in result["notes"])
+
+    def test_new_install_kept_when_cleanup_disabled(self):
+        """cleanup_uninstall=false + 新装样本 → 安装运行但不卸载（保留观察）"""
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options(cleanup_uninstall=False))
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        assert result["status"] == "executed"
+        assert any(c[0] == "install" for c in runner.calls)
+        assert not any(c[0] == "uninstall" for c in runner.calls)
+        assert result["kept_installed"] is True
+        assert any(c[0] == "clear_proxy" for c in runner.calls)
+
     def test_existing_package_unknown_version_refused_by_default(self):
         """设备版本未知（解析失败）+ 默认配置 → 保守拒绝"""
         runner = FakeRunner()

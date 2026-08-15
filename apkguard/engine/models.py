@@ -119,6 +119,7 @@ class DynamicStatus:
     frida_hooked: bool = False  # Frida hook 是否成功采集
     decoy_installed: bool = False  # 诱饵数据是否注入成功
     cleanup_ok: bool = True  # 跑后清理是否完成（安全铁律 3）
+    kept_installed: bool = False  # cleanup_uninstall=false 时保留设备应用不卸载（审计标注）
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

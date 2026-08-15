@@ -162,7 +162,10 @@ rules:
 - **智能终止**：`initial_timeout` 后前台仍活跃则延长至 `max_timeout`；连续
   `idle_timeout` 秒无前台/无流量提前收网。
 - **跑后清理**（安全铁律 3）：无论成功/异常，`finally` 必执行卸载样本 + 清除
-  设备全局代理；清理失败会在报告标注 `cleanup_ok: false`。
+  设备全局代理；清理失败会在报告标注 `cleanup_ok: false`。若测试设备上已有
+  **同包名正式版应用**（同版本直接测试）不想跑完被卸载，可设
+  `cleanup_uninstall: false` 保留（报告标注 `kept_installed: true` 审计；
+  代理仍无条件清除）。
 - **同包名预检**：安装前检查设备上是否已存在同包名应用。默认
   `replace_existing: false` 拒绝安装（防误覆盖设备已有应用）；设为 `true` 则先
   卸载（连用户数据一并清除）再安装，保证干净环境。

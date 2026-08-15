@@ -130,6 +130,9 @@ class DynamicExecutor:
         cleanup_ok = True
         installed = False
         skip_install = False  # 同版本已装 → 跳过安装但跑后仍清理
+        # cleanup_uninstall: false = 保留设备上已安装的应用/样本不卸载（如测试设备
+        # 上已有同包名正式版应用，同版本直接测试后不想被删）。代理始终清除。
+        keep_installed = not bool(self._opt("cleanup_uninstall", True))
 
         try:
             # 0) 安装前预检：设备上是否已存在同包名应用
@@ -290,10 +293,17 @@ class DynamicExecutor:
                 "notes": notes,
             }
         finally:
-            # 9) 清理（安全铁律 3）
+            # 9) 清理（安全铁律 3）。cleanup_uninstall=false 时保留设备上的应用
+            #    不卸载（用户显式授权——例如设备上已有同包名正式版应用，测完保留）；
+            #    代理/采集清理无条件执行。
             if installed:
-                cleanup_ok = self._runner.uninstall(package)
-                if not cleanup_ok:
+                if keep_installed:
+                    self._note(
+                        notes,
+                        f"cleanup: keeping {package} installed (cleanup_uninstall=false)",
+                    )
+                elif not self._runner.uninstall(package):
+                    cleanup_ok = False
                     self._note(notes, "uninstall failed!")
                 else:
                     logger.info(f"cleanup: uninstalled {package}")
@@ -328,6 +338,7 @@ class DynamicExecutor:
             "decoy_installed": decoy_installed,
             "decoy_detail": decoy_detail,
             "cleanup_ok": cleanup_ok,
+            "kept_installed": keep_installed,
             "granted_permissions": granted,
         }
 
