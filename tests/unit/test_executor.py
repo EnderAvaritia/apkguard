@@ -24,10 +24,15 @@ class FakeRunner:
         self.uninstall_ok = True
         self.monkey_raises: Exception | None = None
         self.foreground: str | None = None
+        self.has_package: bool = False  # 设备上是否已有同包名应用
 
     def install(self, apk_path, grant_permissions=True):
         self.calls.append(("install", str(apk_path), grant_permissions))
         return self.install_ok
+
+    def package_installed(self, package):
+        self.calls.append(("package_installed", package))
+        return self.has_package
 
     def ok(self, *args, timeout=60):
         # content insert 等 shell 命令：测试中一律失败 → 诱饵计数为 0
@@ -123,8 +128,9 @@ class TestExecutorRun:
         result = ex.run(Path("sample.apk"), "com.malware.sample", ["android.permission.SEND_SMS"])
 
         assert result["status"] == "executed"
-        assert runner.calls[0][0] == "install"  # 先安装
-        assert any(c[0] == "launch" for c in runner.calls)
+        calls = [c[0] for c in runner.calls]
+        assert calls[0] == "package_installed"  # 安装前预检在先
+        assert calls.index("install") < calls.index("launch")
         assert any(c[0] == "uninstall" for c in runner.calls)  # 清理（铁律 3）
         assert any(c[0] == "clear_proxy" for c in runner.calls)
         assert result["cleanup_ok"] is True
@@ -138,6 +144,41 @@ class TestExecutorRun:
         assert result["status"] == "degraded"
         # 未安装 → 不应卸载（避免误删已有同名 App）
         assert not any(c[0] == "uninstall" for c in runner.calls)
+
+    def test_existing_package_refused_by_default(self):
+        """设备已有同包名应用 + replace_existing 默认 false → 拒绝安装，不卸载不覆盖"""
+        runner = FakeRunner()
+        runner.has_package = True
+        ex = DynamicExecutor(runner, make_options())
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        assert result["status"] == "degraded"
+        assert "已存在同包名" in result["note"]
+        # 预检发生，但绝不 install / uninstall（不碰设备已有应用）
+        assert any(c[0] == "package_installed" for c in runner.calls)
+        assert not any(c[0] == "install" for c in runner.calls)
+        assert not any(c[0] == "uninstall" for c in runner.calls)
+
+    def test_existing_package_replaced_when_configured(self):
+        """replace_existing=true → 先卸载旧包再安装（干净环境）"""
+        runner = FakeRunner()
+        runner.has_package = True
+        ex = DynamicExecutor(runner, make_options(replace_existing=True))
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        assert result["status"] == "executed"
+        calls = [c[0] for c in runner.calls]
+        assert calls.index("uninstall") < calls.index("install")  # 先卸再装
+        assert calls.index("install") < calls.index("launch")
+        assert any("existing package found" in n for n in result["notes"])
+
+    def test_existing_package_replace_uninstall_failure_aborts(self):
+        """replace_existing=true 但卸载失败 → 中止，不安装"""
+        runner = FakeRunner()
+        runner.has_package = True
+        runner.uninstall_ok = False
+        ex = DynamicExecutor(runner, make_options(replace_existing=True))
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        assert result["status"] == "degraded"
+        assert not any(c[0] == "install" for c in runner.calls)
 
     def test_no_package_skips(self):
         runner = FakeRunner()

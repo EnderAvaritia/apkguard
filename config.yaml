@@ -37,8 +37,8 @@ test_devices: []
 
 # 动态分析默认参数（智能终止策略）
 dynamic:
-  enabled: false        # 全局开关（false = 动态分析禁用；改为 true 前请先配置 test_devices）
-  initial_timeout: 300  # 初始运行时长（秒），默认 5 分钟
+  enabled: true        # 全局开关（false = 动态分析禁用；改为 true 前请先配置 test_devices）
+  initial_timeout: 10  # 初始运行时长（秒），默认 5 分钟
   max_timeout: 900      # 活跃时最多延长到（秒），默认 15 分钟
   idle_timeout: 45      # 静默多少秒后提前收网
   fake_gps: false       # 是否模拟位置
@@ -49,6 +49,8 @@ dynamic:
   poll_interval: 5      # 智能终止轮询间隔（秒）
   monkey_events: 200    # 每轮 monkey 随机事件数（UI 交互兜底）
   monkey_interval: 30   # 两轮 monkey 交互之间的间隔（秒）
+  replace_existing: false  # 设备已存在同包名应用时的处理：false=拒绝安装并提示（默认，防误覆盖）；
+                           # true=先卸载（连数据一并清除）再安装，保证干净环境
 
 # ============================================================
 # 可选增强模块（默认关闭，显式配置才启用 —— 隐私硬约束）

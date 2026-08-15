@@ -90,6 +90,30 @@ class DynamicExecutor:
         installed = False
 
         try:
+            # 0) 安装前预检：设备上是否已存在同包名应用
+            #    默认保守（replace_existing=false）：拒绝安装并提示，绝不误覆盖
+            #    设备上已有的应用；显式配置 replace_existing=true 才允许先卸载再装。
+            if self._runner.package_installed(package):
+                if not self._opt("replace_existing", False):
+                    return {
+                        "status": "degraded",
+                        "note": (
+                            f"设备上已存在同包名应用 {package}；为避免误覆盖，"
+                            f"本次不安装（可在 config.yaml 设置 dynamic.replace_existing: true "
+                            f"允许先卸载再装）/ package {package} already installed on device; "
+                            f"skipped to avoid overwriting (set dynamic.replace_existing: true to replace)"
+                        ),
+                        "notes": notes + ["existing package refused"],
+                    }
+                notes.append("existing package found; uninstalling before install")
+                if not self._runner.uninstall(package):
+                    return {
+                        "status": "degraded",
+                        "note": "卸载设备上已有同包名应用失败，中止本次安装 / "
+                                "failed to uninstall existing package; abort",
+                        "notes": notes + ["uninstall existing failed"],
+                    }
+
             # 1) 安装（-g 预授权全部危险权限）
             installed = self._runner.install(str(apk_path), grant_permissions=True)
             if not installed:

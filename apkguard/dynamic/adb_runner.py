@@ -53,8 +53,16 @@ class AdbRunner:
         args.append(apk_path)
         return self.ok(*args, timeout=180)
 
+    def package_installed(self, package: str) -> bool:
+        """设备上是否已存在同包名应用（`pm path <pkg>` 非空即已安装）。
+
+        用于动态分析安装前预检：避免重复安装失败，或误覆盖已有应用。
+        """
+        return bool(self.shell(f"pm path {package}", timeout=30))
+
     def uninstall(self, package: str) -> bool:
-        """卸载已安装的样本包（跑后清理）"""
+        """卸载已安装的样本包（跑后清理）。
+        不带 -k：连 /data/data/<pkg> 用户数据一并清除，保证下次安装环境干净。"""
         return self.ok("uninstall", package, timeout=60)
 
     def launch(self, package: str) -> bool:
