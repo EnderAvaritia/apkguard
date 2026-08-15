@@ -34,11 +34,12 @@ python -m venv .venv
 ## 使用 / Usage
 
 ```bash
-# 单文件分析（终端输出详情）
+# 单文件分析：终端输出详情 + 默认生成 <文件名>.json 与 <文件名>.html 报告
+# （如 app.apk → app.json / app.html，均按输入文件名命名）
 .venv\Scripts\python -m apkguard analyze path/to/app.apk
 
-# 同时导出 JSON / HTML 报告（HTML 自包含单文件，可发给他人）
-.venv\Scripts\python -m apkguard analyze app.apk --json report.json --html report.html
+# 指定报告文件名（覆盖默认命名）
+.venv\Scripts\python -m apkguard analyze app.apk --json my_report.json --html my_report.html
 
 # 批量扫描目录（--workers 指定并发，默认自动探测 CPU 核数）
 .venv\Scripts\python -m apkguard scan ./apk_folder/
