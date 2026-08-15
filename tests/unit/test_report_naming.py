@@ -1,13 +1,14 @@
 """CLI 报告命名逻辑单元测试：默认以输入文件名命名，含非法字符清理。"""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from apkguard.cli import _default_report_base, _sanitize_filename
-from apkguard.engine.models import Report
+from apkguard.engine.models import Report, RiskLevel
 
 
 def make_report(file_name: str) -> Report:
@@ -46,3 +47,61 @@ class TestDefaultReportBase:
     def test_no_extension(self):
         report = make_report("sample")
         assert _default_report_base(report) == "sample"
+
+
+class TestWriteReports:
+    """analyze/dynamic 共用报告写盘：默认以输入文件名命名，--json/--html 可覆盖"""
+
+    def test_default_naming(self, tmp_path, monkeypatch):
+        from apkguard.cli import _write_reports
+
+        monkeypatch.chdir(tmp_path)
+        _write_reports(make_report("app.apk"), None, None)
+        assert (tmp_path / "app.json").exists()
+        assert (tmp_path / "app.html").exists()
+
+    def test_custom_names(self, tmp_path, monkeypatch):
+        from apkguard.cli import _write_reports
+
+        monkeypatch.chdir(tmp_path)
+        _write_reports(make_report("app.apk"), "my.json", "my.html")
+        assert (tmp_path / "my.json").exists()
+        assert (tmp_path / "my.html").exists()
+        assert not (tmp_path / "app.json").exists()
+
+
+class TestScanSummary:
+    """scan 自动输出批量汇总报告"""
+
+    def make_reports(self):
+        clean = make_report("clean.apk")
+        clean.risk_level = RiskLevel.CLEAN
+        suspicious = make_report("susp.apk")
+        suspicious.risk_level = RiskLevel.SUSPICIOUS
+        malicious = make_report("mal.apk")
+        malicious.risk_level = RiskLevel.MALICIOUS
+        malicious.total_score = 12
+        return [("a/clean.apk", clean), ("b/susp.apk", suspicious), ("c/mal.apk", malicious)]
+
+    def test_json_summary(self, tmp_path):
+        from apkguard.output.json_report import write_scan_summary_json
+
+        out = tmp_path / "scan_summary.json"
+        write_scan_summary_json(self.make_reports(), ["boom.apk failed"], out, "apk_folder")
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["counts"] == {"clean": 1, "suspicious": 1, "malicious": 1}
+        assert data["total"] == 3
+        assert data["errors"] == ["boom.apk failed"]
+        assert data["files"][0]["path"] == "c/mal.apk"  # 按分数降序
+        assert "report" in data["files"][0]
+
+    def test_html_summary(self, tmp_path):
+        from apkguard.output.html_report import write_scan_summary_html
+
+        out = tmp_path / "scan_summary.html"
+        entries = [(p, r.to_dict()) for p, r in self.make_reports()]
+        write_scan_summary_html(entries, ["boom"], "apk_folder", out)
+        text = out.read_text(encoding="utf-8")
+        assert "apkguard" in text and "clean.apk" in text and "mal.apk" in text
+        assert "失败 / Failed" in text  # 错误区块
+        assert "<!DOCTYPE html>" in text

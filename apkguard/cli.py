@@ -70,6 +70,10 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="显式指定 adb 设备（绕过 test_devices 白名单）")
     p_dynamic.add_argument("--no-static", action="store_true",
                            help="跳过静态检测与打分，仅解析包名/权限后直接动态分析")
+    p_dynamic.add_argument("--json", default=None, metavar="OUT.json",
+                           help="JSON 报告路径（默认以输入文件名命名输出）")
+    p_dynamic.add_argument("--html", default=None, metavar="OUT.html",
+                           help="HTML 报告路径（默认以输入文件名命名输出）")
 
     return parser
 
@@ -157,6 +161,29 @@ def _default_report_base(report: Report) -> str:
     return _sanitize_filename(Path(report.file_name).stem)
 
 
+def _write_reports(report: Report, json_arg: str | None, html_arg: str | None) -> None:
+    """写 JSON/HTML 报告（analyze / dynamic 共用）。
+
+    默认以输入文件名命名（--json/--html 指定时用指定文件名）。
+    """
+    default_base = _default_report_base(report)
+    json_out = Path(json_arg) if json_arg else Path(f"{default_base}.json")
+    write_json_report(report, json_out)
+    print(f"JSON 报告已写入 / JSON report written: {json_out}")
+
+    html_out = Path(html_arg) if html_arg else Path(f"{default_base}.html")
+    try:
+        from apkguard.output.html_report import write_html_report
+
+        write_html_report(report.to_dict(), html_out)
+        print(f"HTML 报告已写入 / HTML report written: {html_out}")
+    except ImportError:
+        print(
+            f"警告：HTML 报告模块不可用，已跳过 / Warning: HTML report unavailable",
+            file=sys.stderr,
+        )
+
+
 def cmd_analyze(args) -> int:
     config = _resolve_config(args)
     rules = load_rules(config.rules_dir)
@@ -170,24 +197,7 @@ def cmd_analyze(args) -> int:
     _attach_dynamic_status(report, config, getattr(args, "device", None))
 
     console.print_analysis_report(report)
-
-    # 默认输出报告：以输入文件名命名（--json/--html 指定时用指定文件名）
-    default_base = _default_report_base(report)
-    json_out = Path(args.json) if args.json else Path(f"{default_base}.json")
-    write_json_report(report, json_out)
-    print(f"JSON 报告已写入 / JSON report written: {json_out}")
-
-    html_out = Path(args.html) if args.html else Path(f"{default_base}.html")
-    try:
-        from apkguard.output.html_report import write_html_report
-
-        write_html_report(report.to_dict(), html_out)
-        print(f"HTML 报告已写入 / HTML report written: {html_out}")
-    except ImportError:
-        print(
-            f"警告：HTML 报告模块不可用，已跳过 / Warning: HTML report unavailable",
-            file=sys.stderr,
-        )
+    _write_reports(report, args.json, args.html)
     return 0
 
 
@@ -245,6 +255,18 @@ def cmd_scan(args) -> int:
                 errors.append(str(e))
 
     console.print_scan_summary(results, errors)
+    # 自动输出批量汇总报告（JSON + HTML，落盘当前目录）
+    from apkguard.output.html_report import write_scan_summary_html
+    from apkguard.output.json_report import write_scan_summary_json
+
+    write_scan_summary_json(results, errors, Path("scan_summary.json"), str(root))
+    write_scan_summary_html(
+        [(p, r.to_dict()) for p, r in results], errors, str(root), Path("scan_summary.html")
+    )
+    print(
+        "批量扫描汇总报告已写入 / Scan summary written: "
+        "scan_summary.json / scan_summary.html"
+    )
     return 0
 
 
@@ -284,6 +306,7 @@ def cmd_dynamic(args) -> int:
         )
 
     console.print_analysis_report(report)
+    _write_reports(report, args.json, args.html)
     return 0
 
 
