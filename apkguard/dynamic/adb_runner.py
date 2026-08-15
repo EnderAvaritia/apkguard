@@ -90,6 +90,20 @@ class AdbRunner:
         # 兜底：monkey -p pkg 1 会拉起 launcher activity
         return self.monkey(package, events=1)
 
+    def start_activity(self, package: str, activity: str) -> bool:
+        """am start 指定 activity（随机唤起用）。
+
+        activity 可为全限定类名（com.box.app.MainActivity）、短类名（.MainActivity）
+        或已含包名前缀的组件（com.box.app/.MainActivity）。
+        """
+        if activity.startswith("."):
+            target = package + activity
+        elif "/" in activity:
+            target = activity
+        else:
+            target = f"{package}/{activity}"
+        return self.ok("shell", "am", "start", "-n", target, timeout=30)
+
     def resolve_launcher_activity(self, package: str) -> Optional[str]:
         """返回 `pkg/activity` 形式的 launcher activity；失败返回 None"""
         out = self.shell("cmd package resolve-activity --brief " + package, timeout=30)

@@ -67,6 +67,8 @@ class AdbBackend(DynamicBackend):
             app.package,
             app.dangerous_permissions,
             version_code=app.version_code,
+            activities=app.activities,
+            exported_activities=app.exported_activities,
         )
         result["device_used"] = device.serial
         result["backend"] = self.name

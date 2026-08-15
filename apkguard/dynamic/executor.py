@@ -22,7 +22,11 @@ from typing import Optional
 from apkguard.dynamic.adb_runner import AdbRunner
 from apkguard.dynamic.decoy import install_decoy_data
 from apkguard.dynamic.frida_collector import FridaCollector, FridaResult
-from apkguard.dynamic.interaction import drive_interaction, pre_grant_permissions
+from apkguard.dynamic.interaction import (
+    drive_activities,
+    drive_interaction,
+    pre_grant_permissions,
+)
 from apkguard.dynamic.traffic import ProxyCapture, resolve_proxy_target
 
 
@@ -49,6 +53,31 @@ def should_stop(
     return False
 
 
+def termination_reason(
+    elapsed: float,
+    idle_seconds: float,
+    initial_timeout: int,
+    max_timeout: int,
+    idle_timeout: int,
+) -> str:
+    """收网原因标签（与 should_stop 同规则，纯函数便于测试）"""
+    if elapsed >= max_timeout:
+        return "max timeout"
+    if idle_seconds >= idle_timeout:
+        return "idle"
+    return "initial timeout"
+
+
+def _exclude_baseline(endpoints: list[str], baseline: list[str]) -> list[str]:
+    """剔除基线期已出现的环境端点，保留样本相关端点。
+
+    全局代理会捕获设备上所有 App 的流量（含系统/其它应用的"邻居流量"），
+    运行前先采集一段基线，跑完后差集即为最可能属于样本的端点。
+    """
+    baseline_set = set(baseline)
+    return [e for e in endpoints if e not in baseline_set]
+
+
 class DynamicExecutor:
     """针对单台准入设备的一次动态分析"""
 
@@ -69,6 +98,8 @@ class DynamicExecutor:
         package: Optional[str],
         dangerous_permissions: list[str],
         version_code: Optional[str] = None,
+        activities: Optional[list[str]] = None,
+        exported_activities: Optional[list[str]] = None,
     ) -> dict:
         """执行动态分析，返回结果 dict（永不抛异常——失败也降级为状态结果）"""
         notes: list[str] = []
@@ -161,7 +192,9 @@ class DynamicExecutor:
             else:
                 decoy_detail, decoy_installed = {}, False
 
-            # 4) 启动代理抓包
+            # 4) 启动代理抓包 + 基线采集（剔除设备环境流量）
+            baseline_endpoints: list[str] = []
+            baseline_count = 0
             proxy_addr = resolve_proxy_target(
                 self._runner.serial,
                 self._opt("host_ip", ""),
@@ -172,6 +205,15 @@ class DynamicExecutor:
                 if capture.start() and self._runner.set_global_proxy(proxy_host, int(proxy_port)):
                     proxy_set = True
                     notes.append(f"proxy {proxy_addr}")
+                    baseline_seconds = max(0, int(self._opt("baseline_seconds", 10)))
+                    if baseline_seconds > 0:
+                        # 样本启动前先采集环境流量，跑完后差集即样本相关端点
+                        time.sleep(baseline_seconds)
+                        baseline_endpoints = list(capture.endpoints)
+                        baseline_count = capture.count
+                        notes.append(
+                            f"baseline captured {len(baseline_endpoints)} ambient endpoints"
+                        )
                 else:
                     capture.stop()
                     notes.append("proxy unavailable (capture skipped)")
@@ -182,6 +224,22 @@ class DynamicExecutor:
             launched = self._runner.launch(package)
             if not launched:
                 notes.append("launch failed (best-effort continue)")
+
+            # 5.5) 随机唤起 activity（强制执行更多代码路径）
+            #      默认只唤起"可被外部唤起"的（exported=true / 带 intent-filter），
+            #      避免误触发非导出内部组件的副作用路径或缺 extras 的噪音崩溃；
+            #      显式配置 interact_hidden_activities: true 才随机唤起全部。
+            activity_pool = activities or []
+            hidden = self._opt("interact_hidden_activities", False)
+            drive_list = activity_pool if hidden else (exported_activities or [])
+            if self._opt("interact_activities", True) and drive_list:
+                activity_launched = drive_activities(self._runner, package, drive_list)
+                notes.append(
+                    f"activity driving: launched {len(activity_launched)}/{len(drive_list)}"
+                    f" ({'all' if hidden else 'exported-only'})"
+                )
+            else:
+                activity_launched = []
 
             # 6) Frida 采集（后台线程，有则全量无则降级）
             use_frida = self._opt("use_frida", True)
@@ -226,17 +284,23 @@ class DynamicExecutor:
                     notes.append("proxy reset failed!")
             capture.stop()
 
-        endpoints = capture.endpoints
+        all_endpoints = capture.endpoints
+        sample_endpoints = _exclude_baseline(all_endpoints, baseline_endpoints)
+        excluded = len(all_endpoints) - len(sample_endpoints)
         return {
             "status": "executed",
             "note": (
-                f"动态分析完成，采集到 {len(endpoints)} 个网络端点 / "
-                f"Dynamic analysis done; {len(endpoints)} endpoints captured"
+                f"动态分析完成，采集到 {len(sample_endpoints)} 个样本相关网络端点"
+                f"（基线剔除 {excluded} 个环境端点）/ Dynamic analysis done; "
+                f"{len(sample_endpoints)} sample endpoints captured "
+                f"({excluded} ambient endpoints excluded by baseline)"
             ),
             "notes": notes,
             "duration_seconds": int(time.time() - started),
-            "traffic_endpoints": endpoints,
+            "traffic_endpoints": sample_endpoints,
             "traffic_count": capture.count,
+            "baseline_excluded": excluded,
+            "baseline_endpoints": baseline_endpoints,
             "frida_hooked": bool(frida_result.hooked) if frida_holder else False,
             "frida_messages": frida_result.messages if frida_holder else [],
             "frida_note": frida_result.note if frida_holder else "",
@@ -258,10 +322,11 @@ class DynamicExecutor:
         idle_t = int(self._opt("idle_timeout", 45))
         monkey_events = int(self._opt("monkey_events", 200))
         monkey_interval = max(poll, int(self._opt("monkey_interval", 30)))
+        first_delay = max(poll, int(self._opt("first_interaction_delay", 5)))
 
         last_active = time.time()
         last_count = capture.count
-        next_monkey = time.time() + monkey_interval
+        next_monkey = started + first_delay  # 首次交互尽早触发（早于 initial_timeout 才可能发生）
 
         while True:
             time.sleep(poll)
@@ -284,8 +349,8 @@ class DynamicExecutor:
                 idle_timeout=idle_t,
             ):
                 notes.append(
-                    f"terminated at {int(elapsed)}s "
-                    f"({'max timeout' if elapsed >= max_t else 'idle'})"
+                    f"terminated at {int(elapsed)}s ("
+                    f"{termination_reason(elapsed, now - last_active, initial, max_t, idle_t)})"
                 )
                 break
 

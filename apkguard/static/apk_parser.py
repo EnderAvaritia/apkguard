@@ -89,6 +89,67 @@ def analyze_file(path: Path) -> AnalyzedApp:
 # APK 通道（完整支持）
 # ---------------------------------------------------------------------------
 
+def _extract_exported_activities(apk: APK, package: Optional[str], target_sdk: int) -> Optional[list[str]]:
+    """提取可被外部唤起的 activity（exported=true 或 带 intent-filter 且 targetSdk<=30）。
+
+    规则（Android 导出模型）：
+      - android:exported 显式声明 → 以其为准
+      - 未声明 → 有 intent-filter 且 targetSdk<=30（Android 11 前隐式导出）才视为可导出
+      - 非导出（含 targetSdk>=31 未声明）→ 内部组件，默认不唤起（防误触发副作用路径）
+
+    返回 None 表示解析失败（调用方回退到全量 activities）；空列表合法（全部为内部组件）。
+    """
+    try:
+        xml_bytes = apk.get_android_manifest_axml().get_xml()
+    except Exception:
+        return None
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml_bytes)
+    except Exception:
+        return None
+
+    all_activities = set()
+    try:
+        all_activities = set(apk.get_activities() or [])
+    except Exception:
+        pass
+
+    def _local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    def _resolve(name: str) -> str:
+        """manifest 相对类名 → 全限定类名（与 get_activities() 对齐）"""
+        if name.startswith("."):
+            return (package or "") + name
+        if "." not in name and package:
+            return package + "." + name
+        return name
+
+    exported: list[str] = []
+    for node in root.iter():
+        if _local(node.tag) != "activity":
+            continue
+        attrs = {_local(k): v for k, v in node.attrib.items()}
+        name = attrs.get("name")
+        if not name:
+            continue
+        full = _resolve(name)
+        # 只保留 get_activities() 也认可的全限定名（保证 am start -n 解析一致）
+        if all_activities and full not in all_activities:
+            continue
+        declared = attrs.get("exported")
+        if declared is not None:
+            if declared == "true":
+                exported.append(full)
+            continue
+        has_filter = any(_local(c.tag) == "intent-filter" for c in node)
+        if has_filter and (target_sdk or 0) <= 30:
+            exported.append(full)
+    return sorted(set(exported))
+
+
 def _analyze_apk(path: Path) -> AnalyzedApp:
     warnings: list[str] = []
     apk = APK(str(path))
@@ -141,6 +202,21 @@ def _analyze_apk(path: Path) -> AnalyzedApp:
         app.receivers = apk.get_receivers()
     except Exception:
         warnings.append("无法解析组件 / Failed to parse components")
+
+    # 可导出 activity（动态分析随机唤起用；解析失败时回退全量，宁可多唤不可漏行为）
+    try:
+        target_sdk = int(app.target_sdk or 0)
+    except Exception:
+        target_sdk = 0
+    try:
+        exported = _extract_exported_activities(apk, app.package, target_sdk)
+        if exported is None:
+            app.exported_activities = list(app.activities)
+            warnings.append("无法解析 activity 导出标记，回退全量 / exported flag parse failed, fallback to all")
+        else:
+            app.exported_activities = exported
+    except Exception:
+        app.exported_activities = list(app.activities)
 
     # 签名
     try:

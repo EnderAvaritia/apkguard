@@ -114,6 +114,8 @@ class DynamicStatus:
     duration_seconds: Optional[int] = None  # 实际运行时长
     traffic_endpoints: list[str] = field(default_factory=list)  # 采集到的网络端点（去重）
     traffic_count: int = 0  # 捕获到的请求数
+    baseline_excluded: int = 0  # 基线剔除的环境端点数（邻居流量）
+    baseline_endpoints: list[str] = field(default_factory=list)  # 基线期环境端点
     frida_hooked: bool = False  # Frida hook 是否成功采集
     decoy_installed: bool = False  # 诱饵数据是否注入成功
     cleanup_ok: bool = True  # 跑后清理是否完成（安全铁律 3）
@@ -153,6 +155,7 @@ class AnalyzedApp:
     providers: list[str] = field(default_factory=list)
     activities: list[str] = field(default_factory=list)
     receivers: list[str] = field(default_factory=list)
+    exported_activities: list[str] = field(default_factory=list)  # 可被外部唤起的 activity（动态分析交互用）
 
     # 其他
     signature: Optional[SignatureInfo] = None

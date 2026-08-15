@@ -128,7 +128,7 @@ rules:
 | 后端 | 可插拔：本地 adb 模拟器 / 远程真机 / 第三方沙箱 API（可选，需显式配置） |
 | 行为采集 | 网络流量抓包（必做，C2 核心证据）+ Frida hook 敏感 API（有则全量，无则降级系统层） |
 | 诱饵数据 | 预置通讯录 + 短信 + 通话记录（`--fake-gps` 开关位置模拟） |
-| 交互 | monkey 随机点击兜底 → 定向 UI 自动化为主（弹窗授权优先点允许） |
+| 交互 | 随机唤起 activity（默认仅 exported / 带 intent-filter，防误触内部组件）+ monkey 随机点击兜底 → 定向 UI 自动化为主（弹窗授权优先点允许） |
 | 反沙箱 | 不硬刚；探测环境行为本身作为恶意信号上报 + 报告标注环境可信度 |
 | 智能终止 | 初始 5 分钟 / 活跃延长至多 15 分钟 / 静默 45 秒提前收网 |
 | 同包名预检 | 安装前检测设备是否已有同包名应用：**同版本 → 跳过安装直接测试**；版本不同/未知默认拒绝安装（防误覆盖），`replace_existing: true` 才先卸载（连数据清除）再装 |
@@ -143,6 +143,11 @@ rules:
   无 frida-server / 附加失败一律降级为系统层采集，不报错。
 - **授权策略**：`install -g` 预授权全部危险权限 + `pm grant` 兜底（等效"弹窗优先
   点允许"），避免交互卡在权限弹窗。
+- **activity 唤起**：启动后随机顺序 `am start -n` 唤起可被外部唤起的 activity
+  （manifest 中 `exported=true` 或带 intent-filter 且 targetSdk≤30），强制执行
+  更多代码路径（恶意行为常藏在非 launcher activity 中）。默认**不唤起非导出
+  （内部）activity**——它们只能被 App 内部调用，强行直启可能触发副作用路径或
+  缺参数噪音崩溃；确需全部唤起时设 `interact_hidden_activities: true`。
 - **智能终止**：`initial_timeout` 后前台仍活跃则延长至 `max_timeout`；连续
   `idle_timeout` 秒无前台/无流量提前收网。
 - **跑后清理**（安全铁律 3）：无论成功/异常，`finally` 必执行卸载样本 + 清除

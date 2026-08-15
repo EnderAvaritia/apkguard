@@ -116,3 +116,35 @@ class TestFullPipeline:
             names = zf.namelist()
             assert "AndroidManifest.xml" in names
             assert "classes.dex" in names
+
+    def test_exported_activities_extraction(self, tmp_path):
+        """可导出 activity 提取：exported=true 保留；exported=false 与非导出组件剔除"""
+        apk_file = tmp_path / "exported.apk"
+        apk_file.write_bytes(
+            build_apk(
+                "com.exported.app",
+                [],
+                ["hello"],
+                activities=[
+                    {"name": "com.exported.app.MainActivity", "exported": True},
+                    {"name": "com.exported.app.PickerActivity", "exported": False},
+                    {"name": "com.exported.app.InternalActivity"},  # 未声明（无 filter）→ 剔除
+                    {
+                        "name": "com.exported.app.DeepLinkActivity",
+                        "intent_filter": True,
+                    },  # 带 filter 未声明 → targetSdk<=30 视为导出
+                ],
+            )
+        )
+        app = analyze_file(apk_file)
+        assert set(app.activities) == {
+            "com.exported.app.MainActivity",
+            "com.exported.app.PickerActivity",
+            "com.exported.app.InternalActivity",
+            "com.exported.app.DeepLinkActivity",
+        }
+        # 默认只保留可导出集合：显式 true + 带 filter（targetSdk 未知按 <=30 处理）
+        assert "com.exported.app.MainActivity" in app.exported_activities
+        assert "com.exported.app.DeepLinkActivity" in app.exported_activities
+        assert "com.exported.app.PickerActivity" not in app.exported_activities
+        assert "com.exported.app.InternalActivity" not in app.exported_activities

@@ -39,6 +39,11 @@ _ANDROID_ATTRS = (
     "minSdkVersion",
     "targetSdkVersion",
     "label",
+    "exported",
+    "activity",
+    "intent-filter",
+    "true",
+    "false",
 )
 
 
@@ -92,8 +97,14 @@ def build_axml(
     permissions: list[str],
     version_name: str = "1.0",
     version_code: str = "1",
+    activities: list[dict] | None = None,
 ) -> bytes:
-    """构造最小 AndroidManifest.xml（AXML 二进制格式）"""
+    """构造最小 AndroidManifest.xml（AXML 二进制格式）。
+
+    activities: [{"name": "com.x.MainActivity", "exported": True|False|None,
+                  "intent_filter": bool}, ...]——exported 缺省表示未声明；
+    intent_filter=True 生成 <intent-filter> 子节点。
+    """
     pool = _StringPool()
     # 预留常见字符串
     for attr in _ANDROID_ATTRS:
@@ -108,6 +119,8 @@ def build_axml(
     pool.add(package)
     pool.add(version_name)
     pool.add(version_code)
+    for act in activities or []:
+        pool.add(act["name"])
 
     chunks = bytearray()
     chunks += pool.build()
@@ -176,6 +189,19 @@ def build_axml(
         )
         chunks += end_element("uses-permission")
     chunks += start_element("application", [])
+    for act in activities or []:
+        attrs: list[tuple[str, int, int]] = [
+            ("name", pool.index(act["name"]), pool.index(act["name"]))
+        ]
+        exported = act.get("exported")
+        if exported is not None:
+            val = "true" if exported else "false"
+            attrs.append(("exported", pool.index(val), pool.index(val)))
+        chunks += start_element("activity", attrs)
+        if act.get("intent_filter"):
+            chunks += start_element("intent-filter", [])
+            chunks += end_element("intent-filter")
+        chunks += end_element("activity")
     chunks += end_element("application")
     chunks += end_element("manifest")
 
@@ -286,9 +312,10 @@ def build_apk(
     permissions: list[str],
     payload_strings: list[str],
     class_name: str = "Lcom/test/MainActivity;",
+    activities: list[dict] | None = None,
 ) -> bytes:
     """构造最小 APK（zip 容器）"""
-    manifest = build_axml(package, permissions)
+    manifest = build_axml(package, permissions, activities=activities)
     dex = build_minimal_dex(class_name, payload_strings)
 
     buf = io.BytesIO()

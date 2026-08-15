@@ -52,6 +52,10 @@ class FakeRunner:
         self.calls.append(("launch", package))
         return self.launch_ok
 
+    def start_activity(self, package, activity):
+        self.calls.append(("start_activity", package, activity))
+        return True
+
     def foreground_package(self):
         return self.foreground
 
@@ -96,6 +100,7 @@ def make_options(**overrides) -> dict:
         "proxy_port": free_port(),
         "install_decoy_data": True,
         "use_frida": True,
+        "baseline_seconds": 0,  # 测试默认不采集基线，避免拖慢每个用例 10s
     }
     base.update(overrides)
     return base
@@ -223,7 +228,8 @@ class TestExecutorRun:
     def test_cleanup_runs_on_unexpected_error(self):
         runner = FakeRunner()
         runner.monkey_raises = RuntimeError("boom")
-        ex = DynamicExecutor(runner, make_options(monkey_interval=1))  # 让 monkey 在收网前触发
+        # first_interaction_delay=1：让首轮 monkey 在 idle 收网（2s）前触发
+        ex = DynamicExecutor(runner, make_options(monkey_interval=1, first_interaction_delay=1))
         result = ex.run(Path("sample.apk"), "com.malware.sample", [])
         assert result["status"] == "degraded"
         # finally 清理仍然执行：卸载 + 清代理
@@ -241,3 +247,65 @@ class TestExecutorRun:
         # idle_timeout=2s + poll=1s → 应在数秒内收网，远小于 max_timeout
         assert elapsed < 10
         assert any("terminated" in n for n in result["notes"])
+
+    def test_activity_driving_uses_exported_only_by_default(self):
+        """默认只唤起可导出 activity（exported-only），不碰非导出内部组件"""
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options())
+        activities = ["com.x.A", "com.x.Hidden"]
+        result = ex.run(
+            Path("sample.apk"),
+            "com.x",
+            [],
+            activities=activities,
+            exported_activities=["com.x.A"],
+        )
+        assert result["status"] == "executed"
+        started_acts = [c[2] for c in runner.calls if c[0] == "start_activity"]
+        assert started_acts == ["com.x.A"]  # 只有导出的被唤起
+        assert any("exported-only" in n for n in result["notes"])
+
+    def test_activity_driving_all_when_hidden_enabled(self):
+        """interact_hidden_activities=true → 唤起全部 activity（含非导出）"""
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options(interact_hidden_activities=True))
+        activities = ["com.x.A", "com.x.Hidden"]
+        result = ex.run(
+            Path("sample.apk"),
+            "com.x",
+            [],
+            activities=activities,
+            exported_activities=["com.x.A"],
+        )
+        assert result["status"] == "executed"
+        started_acts = {c[2] for c in runner.calls if c[0] == "start_activity"}
+        assert started_acts == {"com.x.A", "com.x.Hidden"}
+        assert any("(all)" in n for n in result["notes"])
+
+    def test_activity_driving_disabled_skips(self):
+        """interact_activities=false → 完全不唤起 activity"""
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options(interact_activities=False))
+        result = ex.run(
+            Path("sample.apk"),
+            "com.x",
+            [],
+            activities=["com.x.A"],
+            exported_activities=["com.x.A"],
+        )
+        assert result["status"] == "executed"
+        assert not any(c[0] == "start_activity" for c in runner.calls)
+
+    def test_activity_driving_empty_exported_skips(self):
+        """全非导出 + 默认配置 → 一组都不唤起（空导出集合是合法状态）"""
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options())
+        result = ex.run(
+            Path("sample.apk"),
+            "com.x",
+            [],
+            activities=["com.x.Hidden"],
+            exported_activities=[],
+        )
+        assert result["status"] == "executed"
+        assert not any(c[0] == "start_activity" for c in runner.calls)

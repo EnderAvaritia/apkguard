@@ -49,6 +49,10 @@ dynamic:
   poll_interval: 5      # 智能终止轮询间隔（秒）
   monkey_events: 200    # 每轮 monkey 随机事件数（UI 交互兜底）
   monkey_interval: 30   # 两轮 monkey 交互之间的间隔（秒）
+  interact_activities: true    # 是否随机唤起 activity 强制执行更多代码路径
+  interact_hidden_activities: false  # true=也唤起非导出（内部）activity。
+                                     # 默认 false：只唤起可被外部唤起（exported=true / 带 intent-filter）的，
+                                     # 避免误触发内部组件的副作用路径或缺参数的噪音崩溃
   replace_existing: false  # 设备已存在同包名应用且版本不一致（或版本未知）时的处理：
                            # false=拒绝安装并提示（默认，防误覆盖）；true=先卸载（连数据一并清除）再安装。
                            # 同包名同版本 → 视为同一应用残留，跳过安装直接测试（无需本配置）
