@@ -10,6 +10,11 @@ hook 目标（恶意行为高信号）：
   - SmsManager.sendTextMessage：扣费短信 / 短信外传
   - DexClassLoader.<init>：动态加载代码
   - URL.<init>：网络端点（与抓包互相印证）
+  - File.delete / FileOutputStream：文件删除 / 写入（破坏性操作，运行时真实发生才记录）
+  - SQLiteDatabase.execSQL / delete、ContextWrapper.deleteDatabase：删库 / 删数据
+  - DevicePolicyManager.wipeData / lockNow：设备管理器远程擦除 / 锁定
+
+注意：所有带返回值的 hook 必须 return 原始结果，绝不改变样本行为（纯观测）。
 """
 from __future__ import annotations
 
@@ -59,6 +64,66 @@ Java.perform(function () {
         Url.$init.overload('java.lang.String').implementation = function (spec) {
             logMsg('url', spec);
             return this.$init(spec);
+        };
+    } catch (e) {}
+    // ---- 破坏性操作 hook（被动观测，绝不改变样本行为）----
+    try {
+        var File = Java.use('java.io.File');
+        File['delete'].implementation = function () {
+            logMsg('file_delete', this.getAbsolutePath());
+            return this['delete']();
+        };
+    } catch (e) {}
+    try {
+        var Fos = Java.use('java.io.FileOutputStream');
+        Fos.$init.overload('java.lang.String').implementation = function (path) {
+            logMsg('file_write', path);
+            return this.$init(path);
+        };
+        Fos.$init.overload('java.io.File').implementation = function (file) {
+            logMsg('file_write', file.getAbsolutePath());
+            return this.$init(file);
+        };
+    } catch (e) {}
+    try {
+        var Sdb = Java.use('android.database.sqlite.SQLiteDatabase');
+        Sdb.execSQL.overload('java.lang.String').implementation = function (sql) {
+            logMsg('db_execsql', sql);
+            return this.execSQL(sql);
+        };
+        Sdb.execSQL.overload('java.lang.String', '[Ljava.lang.Object;').implementation = function (sql, bind) {
+            logMsg('db_execsql', sql);
+            return this.execSQL(sql, bind);
+        };
+        Sdb['delete'].overload('java.lang.String', 'java.lang.String', '[Ljava.lang.String;').implementation = function (table, where, args) {
+            logMsg('db_delete', table + (where ? ' WHERE ' + where : ''));
+            return this['delete'](table, where, args);
+        };
+    } catch (e) {}
+    try {
+        var Ctx = Java.use('android.content.ContextWrapper');
+        Ctx.deleteDatabase.overload('java.lang.String').implementation = function (name) {
+            logMsg('db_drop', name);
+            return this.deleteDatabase(name);
+        };
+    } catch (e) {}
+    try {
+        var Dpm = Java.use('android.app.admin.DevicePolicyManager');
+        Dpm.wipeData.overload('int').implementation = function (flags) {
+            logMsg('admin_wipe', 'flags=' + flags);
+            return this.wipeData(flags);
+        };
+        Dpm.wipeData.overload('int', 'java.lang.CharSequence').implementation = function (flags, reason) {
+            logMsg('admin_wipe', 'flags=' + flags + ' reason=' + reason);
+            return this.wipeData(flags, reason);
+        };
+        Dpm.lockNow.overload().implementation = function () {
+            logMsg('admin_lock', '');
+            return this.lockNow();
+        };
+        Dpm.lockNow.overload('int').implementation = function (flags) {
+            logMsg('admin_lock', 'flags=' + flags);
+            return this.lockNow(flags);
         };
     } catch (e) {}
 });

@@ -1,0 +1,113 @@
+# 文件 / 数据破坏性操作规则（api + string_feature 类型）
+# 与内置 destructive_ops 检测器互补：
+#   - 内置检测器做"组合判定"（危险路径 + 文件 API 同现、execSQL + DROP/DELETE 同现、
+#     设备管理器声明 + 调用），刻意不报"单独 File.delete"（清缓存等合法场景常见）
+#   - 本文件补"单特征命中"信号，且覆盖用户可见外部存储（/sdcard、/storage/emulated/0、
+#     DCIM）——这是检测器防误报而排除的范围，但对"恶意删除用户文件"的诉求正是关键信号
+rules:
+  # ---- api：文件删除 / 数据清除类调用 ----
+  - id: file_delete
+    type: api
+    title: 调用 File.delete 删除文件
+    title_en: Calls File.delete
+    description: 调用 java.io.File.delete 删除文件；需结合删除路径评估意图（清缓存合法，遍历删除用户文件恶意）
+    api_class: Ljava/io/File;
+    api_method: "delete"
+    severity: medium
+    weight: 2
+
+  - id: file_output_stream
+    type: api
+    title: 写入文件（FileOutputStream）
+    title_en: Writes files via FileOutputStream
+    description: 调用 FileOutputStream 写入文件；写用户目录文件可能是覆盖篡改或销毁证据
+    api_class: Ljava/io/FileOutputStream;
+    severity: low
+    weight: 1
+
+  - id: sqlite_delete
+    type: api
+    title: 调用 SQLiteDatabase.delete 删除数据
+    title_en: Calls SQLiteDatabase.delete
+    description: 调用 SQLiteDatabase.delete 删除表行数据，可能用于清除痕迹或破坏数据
+    api_class: Landroid/database/sqlite/SQLiteDatabase;
+    api_method: "delete"
+    severity: medium
+    weight: 2
+
+  - id: sqlite_execsql
+    type: api
+    title: 调用 SQLiteDatabase.execSQL
+    title_en: Calls SQLiteDatabase.execSQL
+    description: 调用 execSQL 执行任意 SQL，可能执行 DROP/DELETE 删库删表
+    api_class: Landroid/database/sqlite/SQLiteDatabase;
+    api_method: "execSQL"
+    severity: medium
+    weight: 2
+
+  - id: delete_database
+    type: api
+    title: 删除整个数据库文件
+    title_en: Deletes database file
+    description: 调用 Context.deleteDatabase 删除数据库文件，可能是销毁行为证据
+    api_class: Landroid/content/ContextWrapper;
+    api_method: "deleteDatabase"
+    severity: medium
+    weight: 2
+
+  - id: device_admin_wipe
+    type: api
+    title: 调用 DevicePolicyManager.wipeData 擦除设备
+    title_en: Calls DevicePolicyManager.wipeData
+    description: 调用 wipeData 远程擦除设备数据，勒索/破坏类高危行为
+    api_class: Landroid/app/admin/DevicePolicyManager;
+    api_method: "wipeData"
+    severity: critical
+    weight: 5
+
+  - id: device_admin_lock
+    type: api
+    title: 调用 DevicePolicyManager.lockNow 锁屏
+    title_en: Calls DevicePolicyManager.lockNow
+    description: 调用 lockNow 立即锁定屏幕，勒索类行为常见前置步骤
+    api_class: Landroid/app/admin/DevicePolicyManager;
+    api_method: "lockNow"
+    severity: high
+    weight: 3
+
+  # ---- string_feature：用户可见存储路径（检测器刻意排除，以低权提示补充）----
+  - id: sdcard_root_path
+    type: string_feature
+    title: 硬编码外部存储根路径 /sdcard/
+    title_en: Hardcoded /sdcard/ path
+    description: 硬编码 /sdcard/ 路径访问用户可见外部存储；正常应用也常见（导出文件），仅作可疑信号，需结合删除/写入 API 评估
+    feature: "/sdcard/"
+    severity: low
+    weight: 1
+
+  - id: emulated_storage_path
+    type: string_feature
+    title: 硬编码外部存储路径 /storage/emulated/0/
+    title_en: Hardcoded /storage/emulated/0/ path
+    description: 硬编码 /storage/emulated/0/ 路径访问用户可见外部存储；仅作可疑信号
+    feature: "/storage/emulated/0/"
+    severity: low
+    weight: 1
+
+  - id: dcim_path
+    type: string_feature
+    title: 引用相册目录 DCIM
+    title_en: References DCIM directory
+    description: 代码引用 DCIM 相册目录；相册/备份类应用正常，但结合文件删除 API 即为删除用户照片信号
+    feature: "DCIM"
+    severity: medium
+    weight: 2
+
+  - id: download_dir_path
+    type: string_feature
+    title: 引用下载目录
+    title_en: References Download directory
+    description: 代码引用用户下载目录；仅作可疑信号
+    feature: "/Download"
+    severity: low
+    weight: 1
