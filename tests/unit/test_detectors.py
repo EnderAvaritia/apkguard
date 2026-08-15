@@ -139,6 +139,28 @@ class TestSmsTelephonyDetector:
         findings = SmsTelephonyDetector().detect(app, rules)
         assert any("拦截" in f.title for f in findings)
 
+    def test_keyevent_getdeviceid_not_flagged(self, rules):
+        """KeyEvent.getDeviceId() 与手机设备标识无关，不应触发采集告警"""
+        app = make_app(
+            called_methods={
+                "Landroid/view/KeyEvent;->getDeviceId()I",
+            }
+        )
+        findings = SmsTelephonyDetector().detect(app, rules)
+        assert not any("采集" in f.title for f in findings), (
+            f"KeyEvent.getDeviceId 不应触发: {[f.title for f in findings]}"
+        )
+
+    def test_telephony_getdeviceid_flagged(self, rules):
+        """TelephonyManager.getDeviceId()（IMEI）应触发采集告警"""
+        app = make_app(
+            called_methods={
+                "Landroid/telephony/TelephonyManager;->getDeviceId()Ljava/lang/String;",
+            }
+        )
+        findings = SmsTelephonyDetector().detect(app, rules)
+        assert any("采集" in f.title for f in findings)
+
 
 class TestDataExfilDetector:
     def test_exfil_chain(self, rules):
@@ -197,6 +219,28 @@ class TestAntiavEvasionDetector:
     def test_clean_no_finding(self, rules):
         app = make_app(strings={"hello world"})
         assert AntiavEvasionDetector().detect(app, rules) == []
+
+    def test_bouncycastle_class_name_not_emulator(self, rules):
+        """BouncyCastle 类名含 'generic' 子串，不应误判为模拟器检测"""
+        app = make_app(
+            strings={
+                "lorg/bouncycastle/jcajce/provider/symmetric/util/baseblockcipher$aeadgenericblockcipher"
+            }
+        )
+        findings = AntiavEvasionDetector().detect(app, rules)
+        assert not any("模拟器" in f.title for f in findings), (
+            f"BouncyCastle 类名不应触发模拟器检测: {[f.title for f in findings]}"
+        )
+
+    def test_successcontinuation_not_root(self, rules):
+        """类名含 'su' 子串（如 successcontinuation）不应误判为 Root 检测"""
+        app = make_app(
+            strings={"lcom/google/android/gms/tasks/successcontinuation;"}
+        )
+        findings = AntiavEvasionDetector().detect(app, rules)
+        assert not any("Root" in f.title for f in findings), (
+            f"successcontinuation 不应触发 Root 检测: {[f.title for f in findings]}"
+        )
 
 
 class TestDetectorRegistry:

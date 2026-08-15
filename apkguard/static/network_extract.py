@@ -31,6 +31,33 @@ _DOMAIN_RE = re.compile(
 )
 _URL_RE = re.compile(r"\bhttps?://[^\s\"'<>]+", re.IGNORECASE)
 
+# 常见 TLD 白名单：域名候选的最后一段必须是常见 TLD 或国家码。
+# Java 类名（com.foo.bar.baz 等）以任意词结尾，用 TLD 校验可通用区分，
+# 避免对每个框架包维护前缀黑名单（军备竞赛）。
+_VALID_TLDS: frozenset[str] = frozenset(
+    {
+        # 通用 TLD
+        "com", "net", "org", "io", "co", "info", "biz", "me", "tv", "cc",
+        "top", "xyz", "online", "site", "tech", "store", "app", "dev", "ai",
+        "vip", "club", "shop", "link", "live", "fun", "xin", "wang", "mobi",
+        "asia", "cloud", "digital", "space", "website", "world", "email",
+        "blog", "news", "media", "pro", "name", "social", "work", "tech",
+        # 常见国家码
+        "us", "uk", "de", "fr", "jp", "kr", "ru", "in", "br", "au", "ca",
+        "nl", "se", "ch", "it", "es", "mx", "za", "sg", "hk", "tw", "mo",
+        "th", "my", "id", "vn", "ph", "nz", "ie", "at", "be", "dk", "fi",
+        "no", "pl", "pt", "gr", "tr", "il", "ae", "sa", "eg", "ar", "cl",
+        "pe", "uy", "py", "bo", "cn", "hk", "tw", "io", "co", "eu",
+    }
+)
+
+
+def _is_valid_domain(domain: str) -> bool:
+    """域名候选的 TLD 必须在常见列表中，否则视为类名/伪域名"""
+    tld = domain.rsplit(".", 1)[-1]
+    return tld in _VALID_TLDS
+
+
 # 常见噪音域名（误报过滤）
 _NOISE_DOMAINS = {
     "schemas.android.com",
@@ -44,6 +71,41 @@ _NOISE_DOMAINS = {
     "apache.org",
     "xmlpull.org",
 }
+
+# Java 框架包前缀：混淆 APK 的字符串池会保留大量框架类全名，
+# 这些包名（com.google.android.gms.* 等）永远不可能是真实域名，直接过滤。
+# 注意：com.google.android 会被过滤，但 google.com / googleapis.com 保留。
+_CLASS_PREFIX_FILTERS = (
+    "android.",
+    "androidx.",
+    "android.support.",
+    "java.",
+    "javax.",
+    "kotlin.",
+    "kotlinx.",
+    "dalvik.",
+    "junit.",
+    "org.apache.",
+    "org.bouncycastle.",
+    "org.chromium.",
+    "org.json.",
+    "org.xml.",
+    "org.greenrobot.",
+    "com.android.",
+    "com.google.android.",
+    "com.google.firebase.",
+    "com.google.protobuf.",
+    "com.google.gson.",
+    "com.squareup.",
+    "com.facebook.",
+    "com.tencent.",
+    "com.alibaba.",
+    "com.bytedance.",
+    "okhttp3.",
+    "retrofit2.",
+    "rx.",
+    "io.reactivex.",
+)
 
 # 非标准端口判定（这些是常见正常端口）
 _STANDARD_PORTS = {80, 443, 8080, 8443}
@@ -73,6 +135,29 @@ def _is_private_ip(ip_str: str) -> bool:
         )
     except ValueError:
         return False
+
+
+# OID（对象标识符）子树黑名单：证书/加密库中的数字标识符会被 IPv4 正则误提取
+# 如 2.5.29.x (X.509 扩展)、1.3.6.1 (互联网 OID)、1.2.840 (ANSI)、5.5.7.x 等。
+# 实测真实 APK：裸 IP（非 URL 上下文）首段 0-5 的几乎全是 OID/版本号残留；
+# 真实硬编码 IP（61.x、223.x 等）首段都在 6 以上。
+
+
+def _is_oid_like(ip_str: str) -> bool:
+    """判断一个裸 IPv4 字符串是否更可能是 OID/版本号而非 IP。
+
+    仅用于裸 IP 判定；URL 中的 IP host（http://x.x.x.x）上下文更强，
+    由调用方单独处理，不走此过滤。
+    """
+    parts = ip_str.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        first = int(parts[0])
+    except ValueError:
+        return False
+    # 0-5 段：OID/版本号重灾区；真实公网 C2 硬编码几乎不在此范围
+    return first <= 5
 
 
 def _dga_features(domain: str) -> list[str]:
@@ -149,7 +234,9 @@ def _score_and_features(endpoint: str, kind: str) -> tuple[int, list[str]]:
                 score += 2
             # 递归评估 host
             if host and re.fullmatch(r"[\d.]+", host):
-                if _is_private_ip(host):
+                if _is_oid_like(host):
+                    pass  # OID 伪 IP（如 http://2.5.29.x 的字符串），不评分
+                elif _is_private_ip(host):
                     features.append("内网地址 (private IP)")
                     score += 2
                 else:
@@ -171,14 +258,53 @@ def _score_and_features(endpoint: str, kind: str) -> tuple[int, list[str]]:
     return score, features
 
 
-def extract_network_endpoints(strings: set[str]) -> list[NetworkEndpoint]:
-    """从字符串池提取所有网络端点并打分"""
+def _build_class_path_index(classes: list[str]) -> set[str]:
+    """构建类名包路径索引：用于区分"域名"与 Java 类名。
+
+    Java 包名（com.foo.bar）与域名格式完全同形，是域名提取的最大误报源。
+    把每个类名按 '/' 切分，收集所有层级路径（小写），
+    域名候选转斜杠后若命中该索引即判定为类名。
+    """
+    paths: set[str] = set()
+    for cls in classes:
+        c = cls.lstrip("L").rstrip(";").lower()
+        parts = c.split("/")
+        for i in range(1, len(parts) + 1):
+            paths.add("/".join(parts[:i]))
+    return paths
+
+
+def extract_network_endpoints(
+    strings: set[str], classes: list[str] | None = None
+) -> list[NetworkEndpoint]:
+    """从字符串池提取所有网络端点并打分。
+
+    classes: dex 类名列表（可选），用于过滤被误判为域名的 Java 包名。
+    """
     endpoints: dict[str, NetworkEndpoint] = {}
+    class_paths = _build_class_path_index(classes or []) if classes else None
 
     def add(endpoint: str, kind: str, context: str = "") -> None:
         endpoint = endpoint.rstrip(".,;:)")
         if not endpoint or len(endpoint) > 512:
             return
+        # OID 伪 IP 过滤：证书/加密库的数字标识符不是网络端点
+        if kind == "ip" and _is_oid_like(endpoint):
+            return
+        # Java 类名过滤：包路径与域名同形
+        if kind == "domain":
+            low = endpoint.lower()
+            if low in _NOISE_DOMAINS or low.endswith(".local"):
+                return
+            # TLD 白名单：非标准 TLD 的多段点分串是类名/伪域名
+            if not _is_valid_domain(low):
+                return
+            if any(low.startswith(p) for p in _CLASS_PREFIX_FILTERS):
+                return
+            if class_paths is not None:
+                norm = low.replace(".", "/")
+                if norm in class_paths:
+                    return
         score, features = _score_and_features(endpoint, kind)
         if endpoint in endpoints:
             existing = endpoints[endpoint]

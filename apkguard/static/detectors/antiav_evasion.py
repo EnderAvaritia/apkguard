@@ -10,16 +10,23 @@ from apkguard.engine.rule_engine import RuleSet
 from apkguard.static.detectors.base import BaseDetector
 
 # 模拟器特征字符串（Build 属性检测、文件路径检测）
+# 注意：不用裸 "generic"/"emulator" 子串——BouncyCastle 等库的类名
+# （如 aeadgenericblockcipher）会误命中，必须使用精确特征
 _EMULATOR_STRINGS = (
-    "generic",
+    "generic_x86",
+    "generic_arm",
+    "generic_x64",
+    "sdk_gphone",
     "goldfish",
     "ranchu",
-    "sdk_gphone",
-    "emulator",
     "qemu",
-    "no.emulator",
     "is_emulator",
     "phone_emulator",
+    "ro.hardware",
+    "Build.FINGERPRINT",
+    "emulator-5554",
+    "/system/bin/qemu-props",
+    "/dev/socket/qemud",
 )
 # 反调试字符串/API
 _ANTIDEBUG_STRINGS = (
@@ -35,12 +42,14 @@ _HOOK_STRINGS = (
     "substrate",
     "edxposed",
 )
-# Root 检测字符串
+# Root 检测字符串（精确路径/命令，不用裸 "su"——successcontinuation 等类名会误命中）
 _ROOT_STRINGS = (
-    "su",
+    "/system/xbin/su",
+    "/system/bin/su",
+    "which su",
+    "su -c",
     "Superuser.apk",
     "magisk",
-    "/system/xbin/which",
     "ro.secure",
     "test-keys",
 )

@@ -32,7 +32,7 @@ class C2NetworkDetector(BaseDetector):
 
     def detect(self, app: AnalyzedApp, rules: RuleSet) -> list[Finding]:
         findings: list[Finding] = []
-        endpoints = extract_network_endpoints(app.strings)
+        endpoints = extract_network_endpoints(app.strings, app.classes)
         if not endpoints:
             return findings
 

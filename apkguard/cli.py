@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -42,8 +43,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--severity", choices=["low", "normal", "high"], default="low",
                            help="风险阈值档位 (默认 low: 少漏报)")
     p_analyze.add_argument("--rules-dir", default=None, help="自定义规则目录")
-    p_analyze.add_argument("--json", default=None, metavar="OUT.json", help="导出 JSON 报告")
-    p_analyze.add_argument("--html", default=None, metavar="OUT.html", help="导出 HTML 报告")
+    p_analyze.add_argument("--json", default=None, metavar="OUT.json",
+                           help="JSON 报告路径（默认以 App 名称命名输出）")
+    p_analyze.add_argument("--html", default=None, metavar="OUT.html",
+                           help="HTML 报告路径（默认以 App 名称命名输出）")
     p_analyze.add_argument("--config", default=None, metavar="config.yaml", help="自定义配置文件")
 
     # scan 子命令
@@ -96,7 +99,7 @@ def _make_report(app: AnalyzedApp, config: Config, severity: str, rules: RuleSet
     # 补充网络端点（由 C2 检测器提取，从 findings detail 中恢复或重新提取）
     from apkguard.static.network_extract import extract_network_endpoints
 
-    report.network_endpoints = extract_network_endpoints(app.strings)
+    report.network_endpoints = extract_network_endpoints(app.strings, app.classes)
     apply_classification(report, config.get_threshold(severity))
     return report
 
@@ -105,6 +108,19 @@ def _attach_dynamic_status(report: Report, config: Config) -> None:
     """按配置与设备状态更新报告的动态分析标注（第一版不真正执行）"""
     dm = DeviceManager(config.test_devices)
     update_dynamic_status(report, dm, config.dynamic_options)
+
+
+def _sanitize_filename(name: str, max_len: int = 60) -> str:
+    """清理为安全的文件名：移除 Windows 非法字符，兜底 'report'"""
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name)
+    cleaned = cleaned.strip().strip(".")  # 结尾点号在 Windows 非法
+    cleaned = cleaned[:max_len].strip()
+    return cleaned or "report"
+
+
+def _default_report_base(report: Report) -> str:
+    """默认报告文件名主干：输入文件名（去掉扩展名），如 app.apk → app"""
+    return _sanitize_filename(Path(report.file_name).stem)
 
 
 def cmd_analyze(args) -> int:
@@ -121,18 +137,23 @@ def cmd_analyze(args) -> int:
 
     console.print_analysis_report(report)
 
-    if args.json:
-        write_json_report(report, Path(args.json))
-        print(f"JSON 报告已写入 / JSON report written: {args.json}")
-    if args.html:
-        try:
-            from apkguard.output.html_report import write_html_report
+    # 默认输出报告：以输入文件名命名（--json/--html 指定时用指定文件名）
+    default_base = _default_report_base(report)
+    json_out = Path(args.json) if args.json else Path(f"{default_base}.json")
+    write_json_report(report, json_out)
+    print(f"JSON 报告已写入 / JSON report written: {json_out}")
 
-            write_html_report(report.to_dict(), Path(args.html))
-            print(f"HTML 报告已写入 / HTML report written: {args.html}")
-        except ImportError:
-            print("警告：HTML 报告模块不可用 / Warning: HTML report module unavailable",
-                  file=sys.stderr)
+    html_out = Path(args.html) if args.html else Path(f"{default_base}.html")
+    try:
+        from apkguard.output.html_report import write_html_report
+
+        write_html_report(report.to_dict(), html_out)
+        print(f"HTML 报告已写入 / HTML report written: {html_out}")
+    except ImportError:
+        print(
+            f"警告：HTML 报告模块不可用，已跳过 / Warning: HTML report unavailable",
+            file=sys.stderr,
+        )
     return 0
 
 

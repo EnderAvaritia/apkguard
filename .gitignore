@@ -39,3 +39,7 @@ config.local.yaml
 .codegraph/
 .omo/
 
+
+# 分析产物报告
+report*.json
+report*.html

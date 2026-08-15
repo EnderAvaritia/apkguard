@@ -21,10 +21,10 @@ _SMS_RECEIVE_APIS = (
     "Landroid/provider/Telephony$Sms$Intents;",
 )
 _PHONE_NUM_APIS = (
-    "getLine1Number",
-    "getDeviceId",
-    "getSubscriberId",
+    # 必须限定类：KeyEvent.getDeviceId() 与 TelephonyManager 无关，不算设备标识采集
+    "Landroid/telephony/TelephonyManager;",
 )
+_PHONE_NUM_METHODS = ("getLine1Number", "getDeviceId", "getSubscriberId")
 # 手机号 / 扣费号码特征
 _PREMIUM_NUM_RE = re.compile(r"(^|[^\d])(106\d{4,}|125\d{4,}|16\d{5,})($|[^\d])")
 _PHONE_RE = re.compile(r"(^|[^\d])(1[3-9]\d{9})(?![^\d])")
@@ -109,9 +109,12 @@ class SmsTelephonyDetector(BaseDetector):
                 )
             )
 
-        # 4) 手机号码采集（IMSI/IMEI/本机号码）
+        # 4) 手机号码采集（IMSI/IMEI/本机号码）——限定 TelephonyManager 类
         num_hits = [
-            m for m in called if any(api in m for api in _PHONE_NUM_APIS)
+            m
+            for m in called
+            if any(api in m for api in _PHONE_NUM_APIS)
+            and any(method in m for method in _PHONE_NUM_METHODS)
         ]
         if num_hits:
             findings.append(
