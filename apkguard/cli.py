@@ -15,6 +15,7 @@ import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 from apkguard import __version__
 from apkguard.config import Config
@@ -24,7 +25,7 @@ from apkguard.engine.models import AnalyzedApp, Report
 from apkguard.engine.rule_engine import RuleSet, load_rules
 from apkguard.engine.scoring import apply_classification
 from apkguard.output import console
-from apkguard.output.json_report import write_json_report
+from apkguard.output.json_report import write_json_report, write_scan_summary_json
 from apkguard.static.apk_parser import analyze_file
 from apkguard.static.detectors.base import run_all_detectors
 
@@ -161,21 +162,43 @@ def _default_report_base(report: Report) -> str:
     return _sanitize_filename(Path(report.file_name).stem)
 
 
-def _write_reports(report: Report, json_arg: str | None, html_arg: str | None) -> None:
-    """写 JSON/HTML 报告（analyze / dynamic 共用）。
+def _write_html_report(html_data: dict, out_path: Path) -> None:
+    """单样本 HTML 写盘（惰性导入：模块不可用时抛 ImportError，由助手兜底）"""
+    from apkguard.output.html_report import write_html_report
 
-    默认以输入文件名命名（--json/--html 指定时用指定文件名）。
+    write_html_report(html_data, out_path)
+
+
+def _write_scan_summary_html(
+    entries: list[tuple[str, dict]], errors: list[str], scanned_dir: str, out_path: Path
+) -> None:
+    """批量汇总 HTML 写盘（惰性导入，同上）"""
+    from apkguard.output.html_report import write_scan_summary_html
+
+    write_scan_summary_html(entries, errors, scanned_dir, out_path)
+
+
+def _write_report_files(
+    default_base: str,
+    json_arg: str | None,
+    html_arg: str | None,
+    write_json: Callable[[Path], None],
+    write_html: Callable[[Path], None],
+) -> None:
+    """三命令共用的报告写盘助手。
+
+    - analyze / dynamic：default_base=输入文件名（去扩展名），--json/--html 覆盖
+    - scan：default_base="scan_summary"，无覆盖参数，写批量汇总
+
+    默认命名、路径覆盖、HTML 模块缺失的优雅降级统一在这里处理。
     """
-    default_base = _default_report_base(report)
     json_out = Path(json_arg) if json_arg else Path(f"{default_base}.json")
-    write_json_report(report, json_out)
+    write_json(json_out)
     print(f"JSON 报告已写入 / JSON report written: {json_out}")
 
     html_out = Path(html_arg) if html_arg else Path(f"{default_base}.html")
     try:
-        from apkguard.output.html_report import write_html_report
-
-        write_html_report(report.to_dict(), html_out)
+        write_html(html_out)
         print(f"HTML 报告已写入 / HTML report written: {html_out}")
     except ImportError:
         print(
@@ -197,7 +220,13 @@ def cmd_analyze(args) -> int:
     _attach_dynamic_status(report, config, getattr(args, "device", None))
 
     console.print_analysis_report(report)
-    _write_reports(report, args.json, args.html)
+    _write_report_files(
+        _default_report_base(report),
+        args.json,
+        args.html,
+        lambda p: write_json_report(report, p),
+        lambda p: _write_html_report(report.to_dict(), p),
+    )
     return 0
 
 
@@ -255,17 +284,15 @@ def cmd_scan(args) -> int:
                 errors.append(str(e))
 
     console.print_scan_summary(results, errors)
-    # 自动输出批量汇总报告（JSON + HTML，落盘当前目录）
-    from apkguard.output.html_report import write_scan_summary_html
-    from apkguard.output.json_report import write_scan_summary_json
-
-    write_scan_summary_json(results, errors, Path("scan_summary.json"), str(root))
-    write_scan_summary_html(
-        [(p, r.to_dict()) for p, r in results], errors, str(root), Path("scan_summary.html")
-    )
-    print(
-        "批量扫描汇总报告已写入 / Scan summary written: "
-        "scan_summary.json / scan_summary.html"
+    # 自动输出批量汇总报告（JSON + HTML，落盘当前目录）——与 analyze/dynamic 共用写盘助手
+    _write_report_files(
+        "scan_summary",
+        None,
+        None,
+        lambda p: write_scan_summary_json(results, errors, p, str(root)),
+        lambda p: _write_scan_summary_html(
+            [(path, r.to_dict()) for path, r in results], errors, str(root), p
+        ),
     )
     return 0
 
@@ -306,7 +333,13 @@ def cmd_dynamic(args) -> int:
         )
 
     console.print_analysis_report(report)
-    _write_reports(report, args.json, args.html)
+    _write_report_files(
+        _default_report_base(report),
+        args.json,
+        args.html,
+        lambda p: write_json_report(report, p),
+        lambda p: _write_html_report(report.to_dict(), p),
+    )
     return 0
 
 

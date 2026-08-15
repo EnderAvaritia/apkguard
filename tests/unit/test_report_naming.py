@@ -50,24 +50,59 @@ class TestDefaultReportBase:
 
 
 class TestWriteReports:
-    """analyze/dynamic 共用报告写盘：默认以输入文件名命名，--json/--html 可覆盖"""
+    """三命令共用写盘助手：默认命名、--json/--html 覆盖、scan 汇总"""
 
     def test_default_naming(self, tmp_path, monkeypatch):
-        from apkguard.cli import _write_reports
+        from apkguard.cli import _write_report_files
 
         monkeypatch.chdir(tmp_path)
-        _write_reports(make_report("app.apk"), None, None)
+        _write_report_files(
+            "app", None, None,
+            lambda p: Path(p).write_text("{}", encoding="utf-8"),
+            lambda p: Path(p).write_text("<html></html>", encoding="utf-8"),
+        )
         assert (tmp_path / "app.json").exists()
         assert (tmp_path / "app.html").exists()
 
     def test_custom_names(self, tmp_path, monkeypatch):
-        from apkguard.cli import _write_reports
+        from apkguard.cli import _write_report_files
 
         monkeypatch.chdir(tmp_path)
-        _write_reports(make_report("app.apk"), "my.json", "my.html")
+        _write_report_files(
+            "app", "my.json", "my.html",
+            lambda p: Path(p).write_text("{}", encoding="utf-8"),
+            lambda p: Path(p).write_text("<html></html>", encoding="utf-8"),
+        )
         assert (tmp_path / "my.json").exists()
         assert (tmp_path / "my.html").exists()
         assert not (tmp_path / "app.json").exists()
+
+    def test_scan_summary_naming(self, tmp_path, monkeypatch):
+        """scan 通过同一助手写 scan_summary.json/html"""
+        from apkguard.cli import _write_report_files
+
+        monkeypatch.chdir(tmp_path)
+        _write_report_files(
+            "scan_summary", None, None,
+            lambda p: Path(p).write_text("{}", encoding="utf-8"),
+            lambda p: Path(p).write_text("<html></html>", encoding="utf-8"),
+        )
+        assert (tmp_path / "scan_summary.json").exists()
+        assert (tmp_path / "scan_summary.html").exists()
+
+    def test_html_import_error_degrades_gracefully(self, tmp_path, monkeypatch, capsys):
+        """HTML 模块不可用（抛 ImportError）时 JSON 照写、仅警告"""
+        from apkguard.cli import _write_report_files
+
+        monkeypatch.chdir(tmp_path)
+
+        def boom(p):
+            raise ImportError("html_report unavailable")
+
+        _write_report_files("app", None, None, lambda p: Path(p).write_text("{}", encoding="utf-8"), boom)
+        assert (tmp_path / "app.json").exists()
+        assert not (tmp_path / "app.html").exists()
+        assert "警告" in capsys.readouterr().err
 
 
 class TestScanSummary:
