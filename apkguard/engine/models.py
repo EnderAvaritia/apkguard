@@ -116,6 +116,42 @@ class DynamicStatus:
 
 
 @dataclass
+class AnalyzedApp:
+    """解析层产物：APK/AAB 解析后的结构化数据，是检测器的输入契约"""
+
+    file_path: str
+    file_format: str  # "APK" | "AAB"
+    file_size: int
+    sha256: str
+
+    # 应用信息
+    package: Optional[str] = None
+    app_name: Optional[str] = None
+    version: Optional[str] = None
+    min_sdk: Optional[str] = None
+    target_sdk: Optional[str] = None
+
+    # 权限
+    declared_permissions: set[str] = field(default_factory=set)  # 所有声明的权限
+    dangerous_permissions: list[str] = field(default_factory=list)  # 危险权限（按危险权限列表过滤）
+
+    # 代码层信息
+    called_methods: set[str] = field(default_factory=set)  # 被调用的方法全名集合（api 规则匹配用）
+    strings: set[str] = field(default_factory=set)  # 字符串池（特征匹配、网络端点提取用）
+    classes: list[str] = field(default_factory=list)  # 所有类名
+
+    # 组件
+    services: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
+    activities: list[str] = field(default_factory=list)
+    receivers: list[str] = field(default_factory=list)
+
+    # 其他
+    signature: Optional[SignatureInfo] = None
+    parse_warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Report:
     """完整分析报告 / Full analysis report"""
 

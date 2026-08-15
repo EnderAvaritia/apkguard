@@ -1,0 +1,210 @@
+# 危险 API 调用规则（api 类型）
+# api_class 使用 smali 类名；api_method 为方法名片段（可选，缺省匹配该类的任意方法）
+rules:
+  - id: dex_class_loader
+    type: api
+    title: 使用 DexClassLoader 动态加载代码
+    title_en: Uses DexClassLoader for dynamic code loading
+    description: 调用 DexClassLoader 动态加载 dex，常见于加壳、云端下发代码或恶意载荷
+    api_class: Ldalvik/system/DexClassLoader;
+    api_method: "<init>"
+    severity: high
+    weight: 3
+
+  - id: path_class_loader
+    type: api
+    title: 使用 PathClassLoader 动态加载代码
+    title_en: Uses PathClassLoader for dynamic code loading
+    description: 调用 PathClassLoader 加载代码，配合下载场景可能加载远端载荷
+    api_class: Ldalvik/system/PathClassLoader;
+    severity: medium
+    weight: 2
+
+  - id: load_dex
+    type: api
+    title: 调用 loadDex 加载 dex
+    title_en: Calls loadDex to load dex at runtime
+    description: 调用 dalvik.system.DexFile.loadDex 在运行时加载 dex 文件
+    api_class: Ldalvik/system/DexFile;
+    api_method: "loadDex"
+    severity: high
+    weight: 3
+
+  - id: runtime_exec
+    type: api
+    title: 调用 Runtime.exec 执行系统命令
+    title_en: Calls Runtime.exec to run system commands
+    description: 调用 Runtime.exec 执行系统命令，可能用于提权或执行恶意脚本
+    api_class: Ljava/lang/Runtime;
+    api_method: "exec"
+    severity: high
+    weight: 3
+
+  - id: process_builder
+    type: api
+    title: 使用 ProcessBuilder 执行系统命令
+    title_en: Uses ProcessBuilder to run system commands
+    description: 使用 ProcessBuilder 启动系统进程
+    api_class: Ljava/lang/ProcessBuilder;
+    api_method: "start"
+    severity: medium
+    weight: 2
+
+  - id: send_text_message
+    type: api
+    title: 调用 SmsManager 发送短信
+    title_en: Calls SmsManager.sendTextMessage
+    description: 调用发送短信 API，可发送扣费短信或诈骗短信
+    api_class: Landroid/telephony/SmsManager;
+    api_method: "sendTextMessage"
+    severity: critical
+    weight: 5
+
+  - id: send_data_message
+    type: api
+    title: 调用 SmsManager 发送数据短信
+    title_en: Calls SmsManager.sendDataMessage
+    description: 调用发送数据短信 API
+    api_class: Landroid/telephony/SmsManager;
+    api_method: "sendDataMessage"
+    severity: high
+    weight: 4
+
+  - id: sms_broadcast_receiver
+    type: api
+    title: 注册短信接收广播
+    title_en: Registers SMS receive broadcast
+    description: 监听接收短信广播（含验证码），可能实施短信拦截与转发
+    api_class: Landroid/provider/Telephony$Sms$Intents;
+    api_method: "getMessagesFromIntent"
+    severity: high
+    weight: 4
+
+  - id: get_device_id
+    type: api
+    title: 获取设备 ID（IMEI）
+    title_en: Gets device ID (IMEI)
+    description: 调用 getDeviceId 获取 IMEI，设备指纹常被用于追踪或外传
+    api_class: Landroid/telephony/TelephonyManager;
+    api_method: "getDeviceId"
+    severity: medium
+    weight: 2
+
+  - id: get_line1_number
+    type: api
+    title: 获取手机号码
+    title_en: Gets subscriber phone number
+    description: 调用 getLine1Number 获取本机号码
+    api_class: Landroid/telephony/TelephonyManager;
+    api_method: "getLine1Number"
+    severity: medium
+    weight: 2
+
+  - id: get_subscriber_id
+    type: api
+    title: 获取 SIM 卡标识（IMSI）
+    title_en: Gets subscriber ID (IMSI)
+    description: 调用 getSubscriberId 获取 IMSI
+    api_class: Landroid/telephony/TelephonyManager;
+    api_method: "getSubscriberId"
+    severity: medium
+    weight: 2
+
+  - id: get_cell_location
+    type: api
+    title: 获取基站位置
+    title_en: Gets cell location
+    description: 调用 getCellLocation 获取基站位置信息
+    api_class: Landroid/telephony/TelephonyManager;
+    api_method: "getCellLocation"
+    severity: low
+    weight: 1
+
+  - id: content_resolver_query_contacts
+    type: api
+    title: 查询通讯录数据
+    title_en: Queries contacts content provider
+    description: 通过 ContentResolver 查询通讯录，可能窃取联系人
+    api_class: Landroid/content/ContentResolver;
+    api_method: "query"
+    severity: low
+    weight: 1
+
+  - id: audio_record
+    type: api
+    title: 使用 AudioRecord 录音
+    title_en: Uses AudioRecord to record audio
+    description: 调用 AudioRecord 进行录音，可能窃听
+    api_class: Landroid/media/AudioRecord;
+    api_method: "startRecording"
+    severity: high
+    weight: 3
+
+  - id: media_recorder
+    type: api
+    title: 使用 MediaRecorder 录制
+    title_en: Uses MediaRecorder
+    description: 调用 MediaRecorder 录制音频/视频
+    api_class: Landroid/media/MediaRecorder;
+    api_method: "start"
+    severity: medium
+    weight: 2
+
+  - id: camera_open
+    type: api
+    title: 打开摄像头
+    title_en: Opens camera
+    description: 调用 Camera.open 打开摄像头，可能偷拍
+    api_class: Landroid/hardware/Camera;
+    api_method: "open"
+    severity: medium
+    weight: 2
+
+  - id: http_url_connection
+    type: api
+    title: 使用 HttpURLConnection 建立网络连接
+    title_en: Uses HttpURLConnection
+    description: 使用 HttpURLConnection 发起网络请求，需结合端点与数据窃取行为评估
+    api_class: Ljava/net/HttpURLConnection;
+    severity: low
+    weight: 1
+
+  - id: socket_connect
+    type: api
+    title: 建立 Socket 连接
+    title_en: Opens Socket connection
+    description: 直接建立 TCP Socket 连接，可能是自定义协议 C2 通信
+    api_class: Ljava/net/Socket;
+    api_method: "connect"
+    severity: medium
+    weight: 2
+
+  - id: get_running_apps
+    type: api
+    title: 获取运行中的应用列表
+    title_en: Gets running app list
+    description: 获取前台/运行中的应用信息，可能用于检测安全软件或追踪用户行为
+    api_class: Landroid/app/ActivityManager;
+    api_method: "getRunningTasks"
+    severity: low
+    weight: 1
+
+  - id: webview_load_url
+    type: api
+    title: WebView 加载外部 URL
+    title_en: WebView loads external URL
+    description: WebView 加载外部 URL，可能用于钓鱼页面展示
+    api_class: Landroid/webkit/WebView;
+    api_method: "loadUrl"
+    severity: low
+    weight: 1
+
+  - id: webview_add_js_interface
+    type: api
+    title: WebView 添加 JS 接口
+    title_en: WebView adds JavaScript interface
+    description: 向 WebView 添加 JS 接口，若配置不当可导致 JS 执行任意 Java 代码
+    api_class: Landroid/webkit/WebView;
+    api_method: "addJavascriptInterface"
+    severity: medium
+    weight: 2

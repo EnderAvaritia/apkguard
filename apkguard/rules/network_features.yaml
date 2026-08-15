@@ -1,0 +1,74 @@
+# 字符串特征规则（string_feature 类型）
+# feature 为要匹配的字符串片段（不区分大小写子串匹配）
+rules:
+  - id: root_binary_check
+    type: string_feature
+    title: 检测 Root 权限
+    title_en: Checks for root access
+    description: 代码中包含 Root 检测特征，可能用于探测环境或提权行为
+    feature: "su"
+    severity: medium
+    weight: 2
+
+  - id: xposed_check
+    type: string_feature
+    title: 检测 Xposed 框架
+    title_en: Checks for Xposed framework
+    description: 检测 Xposed/Hook 框架存在，常见于反调试与反沙箱
+    feature: "xposed"
+    severity: medium
+    weight: 2
+
+  - id: frida_check
+    type: string_feature
+    title: 检测 Frida 注入
+    title_en: Checks for Frida injection
+    description: 检测 Frida 动态插桩工具，常见于反调试与反沙箱
+    feature: "frida"
+    severity: medium
+    weight: 2
+
+  - id: debugger_check
+    type: string_feature
+    title: 检测调试器
+    title_en: Checks for debugger
+    description: 代码中包含调试器检测逻辑，可能用于反调试
+    feature: "isDebuggerConnected"
+    severity: low
+    weight: 1
+
+  - id: emulator_build_check
+    type: string_feature
+    title: 检测模拟器 Build 特征
+    title_en: Checks emulator Build properties
+    description: 检查 Build 属性（fingerprint/model）判断是否运行在模拟器中，是反沙箱典型特征
+    feature: "generic"
+    severity: medium
+    weight: 2
+
+  - id: premium_number_pattern
+    type: string_feature
+    title: 硬编码疑似扣费号码
+    title_en: Hardcoded likely premium numbers
+    description: 代码中硬编码疑似扣费服务号码（106 开头等），可能用于扣费短信
+    feature: "106"
+    severity: high
+    weight: 3
+
+  - id: dex_file_pattern
+    type: string_feature
+    title: 运行时写入 dex 文件
+    title_en: Writes dex files at runtime
+    description: 代码中引用 .dex 文件路径，可能在运行时释放并加载 dex
+    feature: ".dex"
+    severity: medium
+    weight: 2
+
+  - id: encrypted_payload_hint
+    type: string_feature
+    title: 疑似加密载荷特征
+    title_en: Likely encrypted payload
+    description: 代码中出现常见加密载荷标识（AES/DES 密钥操作特征）
+    feature: "AES/CBC"
+    severity: low
+    weight: 1

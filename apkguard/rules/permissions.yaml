@@ -1,0 +1,119 @@
+# 危险权限规则（permission 类型）
+# 用户可在此添加/修改规则；每条约 10 行；weight 为分值，severity 为严重级别
+rules:
+  - id: sms_send
+    type: permission
+    title: 声明了发送短信权限
+    title_en: Declares SEND_SMS permission
+    description: 应用声明了发送短信权限，可能用于发送扣费短信或诈骗短信
+    permission: android.permission.SEND_SMS
+    severity: high
+    weight: 4
+
+  - id: sms_read
+    type: permission
+    title: 声明了读取短信权限
+    title_en: Declares READ_SMS permission
+    description: 应用声明了读取短信权限，可能窃取短信验证码或银行通知
+    permission: android.permission.READ_SMS
+    severity: high
+    weight: 4
+
+  - id: sms_receive
+    type: permission
+    title: 声明了接收短信权限
+    title_en: Declares RECEIVE_SMS permission
+    description: 应用声明了接收短信权限，可拦截短信（含验证码），配合转发可实施诈骗
+    permission: android.permission.RECEIVE_SMS
+    severity: high
+    weight: 4
+
+  - id: contacts_read
+    type: permission
+    title: 声明了读取通讯录权限
+    title_en: Declares READ_CONTACTS permission
+    description: 应用声明了读取通讯录权限，可能窃取联系人信息
+    permission: android.permission.READ_CONTACTS
+    severity: medium
+    weight: 2
+
+  - id: location_access
+    type: permission
+    title: 声明了获取位置权限
+    title_en: Declares location access permission
+    description: 应用声明了获取精确/粗略位置权限
+    permission: android.permission.ACCESS_FINE_LOCATION
+    severity: medium
+    weight: 2
+
+  - id: record_audio
+    type: permission
+    title: 声明了录音权限
+    title_en: Declares RECORD_AUDIO permission
+    description: 应用声明了录音权限，可能窃听环境声音
+    permission: android.permission.RECORD_AUDIO
+    severity: high
+    weight: 3
+
+  - id: camera
+    type: permission
+    title: 声明了摄像头权限
+    title_en: Declares CAMERA permission
+    description: 应用声明了摄像头权限，可能偷拍
+    permission: android.permission.CAMERA
+    severity: medium
+    weight: 2
+
+  - id: call_phone
+    type: permission
+    title: 声明了拨打电话权限
+    title_en: Declares CALL_PHONE permission
+    description: 应用声明了拨打电话权限，可能拨打扣费电话
+    permission: android.permission.CALL_PHONE
+    severity: high
+    weight: 3
+
+  - id: read_call_log
+    type: permission
+    title: 声明了读取通话记录权限
+    title_en: Declares READ_CALL_LOG permission
+    description: 应用声明了读取通话记录权限，可能窃取通话记录
+    permission: android.permission.READ_CALL_LOG
+    severity: medium
+    weight: 2
+
+  - id: overlay_window
+    type: permission
+    title: 声明了悬浮窗权限
+    title_en: Declares SYSTEM_ALERT_WINDOW permission
+    description: 应用声明了悬浮窗权限，可能用于覆盖其他应用界面实施钓鱼或诱导点击
+    permission: android.permission.SYSTEM_ALERT_WINDOW
+    severity: high
+    weight: 3
+
+  - id: accessibility_bind
+    type: permission
+    title: 声明了无障碍服务绑定权限
+    title_en: Declares BIND_ACCESSIBILITY_SERVICE permission
+    description: 应用声明了无障碍服务，可能用于自动点击、键盘记录或自动授权
+    permission: android.permission.BIND_ACCESSIBILITY_SERVICE
+    severity: high
+    weight: 4
+
+  - id: install_packages
+    type: permission
+    title: 声明了安装应用权限
+    title_en: Declares REQUEST_INSTALL_PACKAGES permission
+    description: 应用声明了安装应用权限，可能用于静默安装其他恶意应用
+    permission: android.permission.REQUEST_INSTALL_PACKAGES
+    severity: high
+    weight: 3
+
+  - id: query_all_packages
+    type: permission
+    title: 声明了查询所有应用权限
+    title_en: Declares QUERY_ALL_PACKAGES permission
+    description: 应用声明了查询所有已安装应用权限，可能用于探测目标应用是否存在
+    permission: android.permission.QUERY_ALL_PACKAGES
+    severity: medium
+    weight: 2
