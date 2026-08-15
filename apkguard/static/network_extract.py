@@ -108,7 +108,7 @@ def _confused_features(s: str) -> list[str]:
             if decoded and b"http" in decoded.lower():
                 features.append("base64 编码的 URL (base64-encoded URL)")
         except Exception:
-            pass
+            pass  # 解码失败说明不是 base64 混淆串，忽略
     return features
 
 
@@ -159,10 +159,8 @@ def _score_and_features(endpoint: str, kind: str) -> tuple[int, list[str]]:
                 sub_score, sub_features = _score_and_features(host, "domain")
                 score += sub_score
                 features.extend(sub_features)
-            if "http" in endpoint.split("://")[0].lower():
-                pass
         except ValueError:
-            pass
+            pass  # 畸形 URL（如非法端口）不评分，忽略
 
     # 通用：混淆特征（对 domain 和 url 都检查）
     confused = _confused_features(endpoint)

@@ -105,19 +105,19 @@ def _analyze_apk(path: Path) -> AnalyzedApp:
     try:
         app.app_name = apk.get_app_name()
     except Exception:
-        pass
+        pass  # 应用名缺失（部分精简 APK）不影响分析
     try:
         app.version = apk.get_androidversion_name()
     except Exception:
-        pass
+        pass  # 版本号缺失不影响分析
     try:
         app.min_sdk = apk.get_min_sdk_version()
     except Exception:
-        pass
+        pass  # SDK 信息缺失不影响分析
     try:
         app.target_sdk = apk.get_target_sdk_version()
     except Exception:
-        pass
+        pass  # SDK 信息缺失不影响分析
 
     # 权限
     try:
@@ -202,7 +202,7 @@ def _signature_schemes(apk: APK) -> list[str]:
     try:
         apk.get_signature_version()
     except Exception:
-        pass
+        pass  # 4.1.4 中该 API 返回方式不稳定，仅尽力探测
     return schemes or ["v1"]
 
 

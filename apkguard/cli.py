@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
-            pass
+            pass  # 流不支持 reconfigure（如已关闭/重定向的流），保持默认编码即可
     parser = _build_parser()
     args = parser.parse_args(argv)
     handlers = {
