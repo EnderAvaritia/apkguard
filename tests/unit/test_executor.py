@@ -25,6 +25,7 @@ class FakeRunner:
         self.monkey_raises: Exception | None = None
         self.foreground: str | None = None
         self.has_package: bool = False  # 设备上是否已有同包名应用
+        self.installed_version: str | None = "100"  # 设备上已有包的 versionCode
 
     def install(self, apk_path, grant_permissions=True):
         self.calls.append(("install", str(apk_path), grant_permissions))
@@ -33,6 +34,10 @@ class FakeRunner:
     def package_installed(self, package):
         self.calls.append(("package_installed", package))
         return self.has_package
+
+    def installed_package_version_code(self, package):
+        self.calls.append(("installed_package_version_code", package))
+        return self.installed_version
 
     def ok(self, *args, timeout=60):
         # content insert 等 shell 命令：测试中一律失败 → 诱饵计数为 0
@@ -146,11 +151,12 @@ class TestExecutorRun:
         assert not any(c[0] == "uninstall" for c in runner.calls)
 
     def test_existing_package_refused_by_default(self):
-        """设备已有同包名应用 + replace_existing 默认 false → 拒绝安装，不卸载不覆盖"""
+        """设备已有同包名应用（版本不同）+ replace_existing 默认 false → 拒绝安装，不卸载不覆盖"""
         runner = FakeRunner()
         runner.has_package = True
+        runner.installed_version = "99"  # 与样本 version_code=100 不同
         ex = DynamicExecutor(runner, make_options())
-        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [], version_code="100")
         assert result["status"] == "degraded"
         assert "已存在同包名" in result["note"]
         # 预检发生，但绝不 install / uninstall（不碰设备已有应用）
@@ -158,25 +164,52 @@ class TestExecutorRun:
         assert not any(c[0] == "install" for c in runner.calls)
         assert not any(c[0] == "uninstall" for c in runner.calls)
 
-    def test_existing_package_replaced_when_configured(self):
-        """replace_existing=true → 先卸载旧包再安装（干净环境）"""
+    def test_existing_package_same_version_skips_install(self):
+        """设备已有同包名且版本一致 → 跳过安装直接测试（跑后仍清理卸载）"""
         runner = FakeRunner()
         runner.has_package = True
+        runner.installed_version = "100"  # 与样本 version_code=100 相同
+        ex = DynamicExecutor(runner, make_options())
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [], version_code="100")
+        assert result["status"] == "executed"
+        # 不安装（同版本已就绪）
+        assert not any(c[0] == "install" for c in runner.calls)
+        assert any("same version" in n for n in result["notes"])
+        assert any(c[0] == "launch" for c in runner.calls)
+        # 跑后清理仍卸载（铁律 3：样本不留设备）
+        assert any(c[0] == "uninstall" for c in runner.calls)
+
+    def test_existing_package_unknown_version_refused_by_default(self):
+        """设备版本未知（解析失败）+ 默认配置 → 保守拒绝"""
+        runner = FakeRunner()
+        runner.has_package = True
+        runner.installed_version = None
+        ex = DynamicExecutor(runner, make_options())
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [], version_code="100")
+        assert result["status"] == "degraded"
+        assert not any(c[0] == "install" for c in runner.calls)
+
+    def test_existing_package_replaced_when_configured(self):
+        """版本不同 + replace_existing=true → 先卸载旧包再安装（干净环境）"""
+        runner = FakeRunner()
+        runner.has_package = True
+        runner.installed_version = "99"  # 与样本 version_code=100 不同
         ex = DynamicExecutor(runner, make_options(replace_existing=True))
-        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [], version_code="100")
         assert result["status"] == "executed"
         calls = [c[0] for c in runner.calls]
         assert calls.index("uninstall") < calls.index("install")  # 先卸再装
         assert calls.index("install") < calls.index("launch")
-        assert any("existing package found" in n for n in result["notes"])
+        assert any("different version" in n for n in result["notes"])
 
     def test_existing_package_replace_uninstall_failure_aborts(self):
         """replace_existing=true 但卸载失败 → 中止，不安装"""
         runner = FakeRunner()
         runner.has_package = True
+        runner.installed_version = "99"
         runner.uninstall_ok = False
         ex = DynamicExecutor(runner, make_options(replace_existing=True))
-        result = ex.run(Path("sample.apk"), "com.malware.sample", [])
+        result = ex.run(Path("sample.apk"), "com.malware.sample", [], version_code="100")
         assert result["status"] == "degraded"
         assert not any(c[0] == "install" for c in runner.calls)
 

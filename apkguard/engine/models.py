@@ -135,6 +135,7 @@ class AnalyzedApp:
     package: Optional[str] = None
     app_name: Optional[str] = None
     version: Optional[str] = None
+    version_code: Optional[str] = None  # 动态分析同包名版本比对用
     min_sdk: Optional[str] = None
     target_sdk: Optional[str] = None
 

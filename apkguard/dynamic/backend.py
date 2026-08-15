@@ -62,7 +62,12 @@ class AdbBackend(DynamicBackend):
             return {"status": "skipped", "note": "无在线目标设备 / no online device"}
         runner = AdbRunner(device.serial)
         executor = DynamicExecutor(runner, options)
-        result = executor.run(apk_path, app.package, app.dangerous_permissions)
+        result = executor.run(
+            apk_path,
+            app.package,
+            app.dangerous_permissions,
+            version_code=app.version_code,
+        )
         result["device_used"] = device.serial
         result["backend"] = self.name
         return result

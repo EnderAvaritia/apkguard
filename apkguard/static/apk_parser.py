@@ -111,6 +111,10 @@ def _analyze_apk(path: Path) -> AnalyzedApp:
     except Exception:
         pass  # 版本号缺失不影响分析
     try:
+        app.version_code = str(apk.get_androidversion_code())
+    except Exception:
+        pass  # versionCode 缺失不影响分析（动态分析版本比对时视为未知）
+    try:
         app.min_sdk = apk.get_min_sdk_version()
     except Exception:
         pass  # SDK 信息缺失不影响分析

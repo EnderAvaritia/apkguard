@@ -68,6 +68,7 @@ class DynamicExecutor:
         apk_path: Path,
         package: Optional[str],
         dangerous_permissions: list[str],
+        version_code: Optional[str] = None,
     ) -> dict:
         """执行动态分析，返回结果 dict（永不抛异常——失败也降级为状态结果）"""
         notes: list[str] = []
@@ -88,40 +89,57 @@ class DynamicExecutor:
         proxy_set = False
         cleanup_ok = True
         installed = False
+        skip_install = False  # 同版本已装 → 跳过安装但跑后仍清理
 
         try:
             # 0) 安装前预检：设备上是否已存在同包名应用
-            #    默认保守（replace_existing=false）：拒绝安装并提示，绝不误覆盖
-            #    设备上已有的应用；显式配置 replace_existing=true 才允许先卸载再装。
+            #    - 已有且版本一致（version_code 相同）→ 视为同一应用的残留，
+            #      跳过安装直接测试（跑后仍卸载清理）
+            #    - 已有但版本不同 / 版本未知 → 默认保守（replace_existing=false）
+            #      拒绝安装并提示，绝不误覆盖设备上已有的应用；
+            #      显式配置 replace_existing=true 才允许先卸载再装。
             if self._runner.package_installed(package):
-                if not self._opt("replace_existing", False):
+                installed_code = self._runner.installed_package_version_code(package)
+                if version_code and installed_code and version_code == installed_code:
+                    notes.append(
+                        f"existing package {package} same version ({version_code}); "
+                        "skip install, test as-is"
+                    )
+                    skip_install = True
+                elif not self._opt("replace_existing", False):
                     return {
                         "status": "degraded",
                         "note": (
-                            f"设备上已存在同包名应用 {package}；为避免误覆盖，"
-                            f"本次不安装（可在 config.yaml 设置 dynamic.replace_existing: true "
-                            f"允许先卸载再装）/ package {package} already installed on device; "
+                            f"设备上已存在同包名应用 {package}（版本 {installed_code or '未知'}，"
+                            f"样本版本 {version_code or '未知'}）；为避免误覆盖，本次不安装"
+                            f"（可在 config.yaml 设置 dynamic.replace_existing: true 允许"
+                            f"先卸载再装）/ package {package} already installed on device "
+                            f"(installed={installed_code or 'unknown'}, sample={version_code or 'unknown'}); "
                             f"skipped to avoid overwriting (set dynamic.replace_existing: true to replace)"
                         ),
                         "notes": notes + ["existing package refused"],
                     }
-                notes.append("existing package found; uninstalling before install")
-                if not self._runner.uninstall(package):
+                else:
+                    notes.append("existing package found with different version; uninstalling before install")
+                    if not self._runner.uninstall(package):
+                        return {
+                            "status": "degraded",
+                            "note": "卸载设备上已有同包名应用失败，中止本次安装 / "
+                                    "failed to uninstall existing package; abort",
+                            "notes": notes + ["uninstall existing failed"],
+                        }
+
+            # 1) 安装（-g 预授权全部危险权限；同版本已装时跳过）
+            if not skip_install:
+                installed = self._runner.install(str(apk_path), grant_permissions=True)
+                if not installed:
                     return {
                         "status": "degraded",
-                        "note": "卸载设备上已有同包名应用失败，中止本次安装 / "
-                                "failed to uninstall existing package; abort",
-                        "notes": notes + ["uninstall existing failed"],
+                        "note": "样本安装失败，动态分析未执行 / install failed",
+                        "notes": notes + ["install failed"],
                     }
-
-            # 1) 安装（-g 预授权全部危险权限）
-            installed = self._runner.install(str(apk_path), grant_permissions=True)
-            if not installed:
-                return {
-                    "status": "degraded",
-                    "note": "样本安装失败，动态分析未执行 / install failed",
-                    "notes": notes + ["install failed"],
-                }
+            else:
+                installed = True  # 已在设备上（同版本），跑后清理仍会卸载
             notes.append("installed")
 
             # 2) 危险权限兜底 pm grant

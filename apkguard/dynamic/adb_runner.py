@@ -60,6 +60,23 @@ class AdbRunner:
         """
         return bool(self.shell(f"pm path {package}", timeout=30))
 
+    def installed_package_version_code(self, package: str) -> Optional[str]:
+        """设备上已安装包的 versionCode（`dumpsys package` 解析）。
+
+        与样本 version_code 比对：同版本视为同一应用（可直接测试），
+        解析失败返回 None（版本未知 → 走保守的 replace_existing 逻辑）。
+        """
+        out = self.shell(
+            f"dumpsys package {package} | grep 'versionCode='",
+            timeout=30,
+        )
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("versionCode="):
+                # 形如: versionCode=172312 minSdk=21 targetSdk=34
+                return line.split(" ", 1)[0].split("=", 1)[1]
+        return None
+
     def uninstall(self, package: str) -> bool:
         """卸载已安装的样本包（跑后清理）。
         不带 -k：连 /data/data/<pkg> 用户数据一并清除，保证下次安装环境干净。"""
