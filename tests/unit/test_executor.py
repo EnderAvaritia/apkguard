@@ -130,6 +130,34 @@ class TestShouldStop:
         assert not should_stop(elapsed=310, active=True, idle_seconds=5,
                                initial_timeout=300, max_timeout=900, idle_timeout=45)
 
+    def test_termination_reason_labels(self):
+        """收网标签与 should_stop 三条件一一对应"""
+        from apkguard.dynamic.executor import termination_reason
+
+        # max timeout：超上限强制收网
+        assert termination_reason(900, 0, 300, 900, 45) == "max timeout"
+        # idle：连续静默超阈值提前收网
+        assert termination_reason(10, 45, 300, 900, 45) == "idle"
+        # initial timeout：过初始窗口且 App 不在前台（非超时、非静默的兜底分支）
+        # 回归锁定：28s 场景（initial=10, idle 未达 45）必须标 initial timeout，而非 idle
+        assert termination_reason(28, 28, 10, 900, 45) == "initial timeout"
+        assert termination_reason(310, 10, 300, 900, 45) == "initial timeout"
+
+    def test_termination_reason_matches_should_stop(self):
+        """should_stop=True 的每个分支，标签与该分支一致"""
+        from apkguard.dynamic.executor import termination_reason
+
+        cases = [
+            # (elapsed, active, idle_seconds, initial, max, idle) → 期望标签
+            (900, True, 0, 300, 900, 45, "max timeout"),
+            (10, False, 45, 300, 900, 45, "idle"),
+            (28, False, 28, 10, 900, 45, "initial timeout"),  # 用户报告的场景
+            (310, False, 10, 300, 900, 45, "initial timeout"),
+        ]
+        for elapsed, active, idle_s, initial, max_t, idle_t, expected in cases:
+            assert should_stop(elapsed, active, idle_s, initial, max_t, idle_t)
+            assert termination_reason(elapsed, idle_s, initial, max_t, idle_t) == expected
+
 
 class TestExecutorRun:
     def test_happy_path_installs_launches_cleans_up(self):
