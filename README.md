@@ -43,6 +43,7 @@ python -m venv .venv
 .venv\Scripts\python -m apkguard analyze app.apk --json my_report.json --html my_report.html
 
 # 批量扫描目录（--workers 指定并发，默认自动探测 CPU 核数）
+# 结束后自动输出 scan_summary.json / scan_summary.html 批量汇总报告
 .venv\Scripts\python -m apkguard scan ./apk_folder/
 
 # 指定阈值档位（low 少漏报 / normal 标准 / high 少误报）
@@ -52,6 +53,7 @@ python -m venv .venv
 .venv\Scripts\python -m apkguard analyze app.apk --rules-dir ./my_rules/
 
 # 动态分析（第二阶段）：需先在 config.yaml 开启 dynamic.enabled 并配置测试设备
+# 默认自动输出 <输入名>.json 与 <输入名>.html 报告（--json/--html 可指定路径）
 .venv\Scripts\python -m apkguard dynamic app.apk
 
 # 显式指定 adb 设备（绕过 test_devices 白名单；报告会标注"绕过白名单"）
@@ -145,6 +147,9 @@ rules:
   `idle_timeout` 秒无前台/无流量提前收网。
 - **跑后清理**（安全铁律 3）：无论成功/异常，`finally` 必执行卸载样本 + 清除
   设备全局代理；清理失败会在报告标注 `cleanup_ok: false`。
+- **同包名预检**：安装前检查设备上是否已存在同包名应用。默认
+  `replace_existing: false` 拒绝安装（防误覆盖设备已有应用）；设为 `true` 则先
+  卸载（连用户数据一并清除）再安装，保证干净环境。
 
 ### ★ 测试设备白名单（安全铁律）
 
