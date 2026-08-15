@@ -42,10 +42,6 @@ config.yaml
 .omo/
 
 
-# 分析产物报告（JSON/HTML，按文件名或目录）
-report*.json
-report*.html
-box-*.json
-box-*.html
-smoke*.json
-smoke*.html
+# 分析产物报告（项目根目录下生成的 JSON/HTML 均为报告，一律不进 git）
+/*.json
+/*.html
