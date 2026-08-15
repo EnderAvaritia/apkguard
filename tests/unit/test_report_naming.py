@@ -110,6 +110,7 @@ class TestScanSummary:
     """scan 自动输出批量汇总报告"""
 
     def make_reports(self):
+        """返回 (路径, Report.to_dict()) 列表——多进程 scan worker 的返回形态"""
         clean = make_report("clean.apk")
         clean.risk_level = RiskLevel.CLEAN
         suspicious = make_report("susp.apk")
@@ -117,7 +118,9 @@ class TestScanSummary:
         malicious = make_report("mal.apk")
         malicious.risk_level = RiskLevel.MALICIOUS
         malicious.total_score = 12
-        return [("a/clean.apk", clean), ("b/susp.apk", suspicious), ("c/mal.apk", malicious)]
+        return [("a/clean.apk", clean.to_dict()),
+                ("b/susp.apk", suspicious.to_dict()),
+                ("c/mal.apk", malicious.to_dict())]
 
     def test_json_summary(self, tmp_path):
         from apkguard.output.json_report import write_scan_summary_json
@@ -135,9 +138,43 @@ class TestScanSummary:
         from apkguard.output.html_report import write_scan_summary_html
 
         out = tmp_path / "scan_summary.html"
-        entries = [(p, r.to_dict()) for p, r in self.make_reports()]
+        entries = self.make_reports()
         write_scan_summary_html(entries, ["boom"], "apk_folder", out)
         text = out.read_text(encoding="utf-8")
         assert "apkguard" in text and "clean.apk" in text and "mal.apk" in text
         assert "失败 / Failed" in text  # 错误区块
         assert "<!DOCTYPE html>" in text
+
+
+class TestScanAdaptiveWorkers:
+    """scan 大小感知自适应并发：防止大文件并行叠加 OOM"""
+
+    def _mkfile(self, tmp_path, name, mb):
+        p = tmp_path / name
+        p.write_bytes(b"\0" * (mb * 1024 * 1024))
+        return p
+
+    def test_requested_1_never_reduced(self, tmp_path):
+        from apkguard.cli import _adaptive_workers
+
+        files = [self._mkfile(tmp_path, "huge.apk", 512)]
+        assert _adaptive_workers(files, 1, 4096) == 1
+
+    def test_large_file_reduces_concurrency(self, tmp_path):
+        """512MB 文件估算 ~150+512*12=6294MB，预算 4096MB → 并发 1"""
+        from apkguard.cli import _adaptive_workers
+
+        files = [self._mkfile(tmp_path, "huge.apk", 512)]
+        assert _adaptive_workers(files, 8, 4096) == 1
+
+    def test_small_files_full_concurrency(self, tmp_path):
+        """13MB 文件估算 ~150+13*12=306MB，预算 4096MB → 可 8 并发"""
+        from apkguard.cli import _adaptive_workers
+
+        files = [self._mkfile(tmp_path, "small.apk", 13) for _ in range(4)]
+        assert _adaptive_workers(files, 8, 4096) == 8
+
+    def test_empty_files_returns_requested(self, tmp_path):
+        from apkguard.cli import _adaptive_workers
+
+        assert _adaptive_workers([], 4, 4096) == 4

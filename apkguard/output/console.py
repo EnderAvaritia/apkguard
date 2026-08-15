@@ -174,7 +174,24 @@ def _print_finding(f: Finding) -> None:
     print(_c(f"           {f.description}", "dim"))
 
 
-def print_scan_summary(results: list[tuple[str, Report]], errors: list[str]) -> None:
+def _scan_item_score(item: tuple[str, Report | dict]) -> int:
+    """汇总表取分数：兼容 Report 对象与 Report.to_dict()（多进程 worker 返回 dict）"""
+    r = item[1]
+    if isinstance(r, dict):
+        return r.get("risk", {}).get("total_score", 0)
+    return r.total_score
+
+
+def _scan_item_level(item: tuple[str, Report | dict]) -> RiskLevel:
+    r = item[1]
+    if isinstance(r, dict):
+        return RiskLevel(r.get("risk", {}).get("risk_level", RiskLevel.CLEAN.value))
+    return r.risk_level
+
+
+def print_scan_summary(
+    results: list[tuple[str, Report | dict]], errors: list[str]
+) -> None:
     """scan 模式：批量汇总表"""
     line = "-" * 68
     print()
@@ -183,13 +200,14 @@ def print_scan_summary(results: list[tuple[str, Report]], errors: list[str]) -> 
     print(f"  {'文件 / File':<42} {'风险 / Risk':<20} 分")
     print(_c(line, "cyan"))
 
-    for path, report in sorted(results, key=lambda r: -r[1].total_score):
-        risk_color = _LEVEL_COLOR.get(report.risk_level, "reset")
+    for path, report in sorted(results, key=lambda r: -_scan_item_score(r)):
+        level = _scan_item_level((path, report))
+        risk_color = _LEVEL_COLOR.get(level, "reset")
         name = path if len(path) <= 40 else "..." + path[-39:]
         print(
             f"  {name:<42} "
-            + _c(f"{report.risk_level.label:<20}", risk_color)
-            + f"{report.total_score}"
+            + _c(f"{level.label:<20}", risk_color)
+            + f"{_scan_item_score((path, report))}"
         )
 
     if errors:
@@ -199,8 +217,12 @@ def print_scan_summary(results: list[tuple[str, Report]], errors: list[str]) -> 
             print(_c(f"    - {e}", "yellow"))
 
     # 统计
-    levels = {r.risk_level for _, r in results}
-    summary = ", ".join(f"{lv.label}: {sum(1 for _, r in results if r.risk_level == lv)}" for lv in RiskLevel if lv in levels)
+    levels = {_scan_item_level(r) for r in results}
+    summary = ", ".join(
+        f"{lv.label}: {sum(1 for r in results if _scan_item_level(r) == lv)}"
+        for lv in RiskLevel
+        if lv in levels
+    )
     print(_c(line, "cyan"))
     print(_c(f"  合计 / Total: {len(results)}  |  {summary}", "bold"))
     print()

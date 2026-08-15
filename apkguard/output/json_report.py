@@ -22,15 +22,19 @@ def write_json_report(report: Report, out_path: Path) -> None:
 
 
 def write_scan_summary_json(
-    results: list[tuple[str, Report]],
+    results: list[tuple[str, dict]],
     errors: list[str],
     out_path: Path,
     scanned_dir: str = "",
 ) -> None:
-    """批量扫描汇总落盘为 JSON：统计 + 文件清单（含完整报告）+ 失败列表"""
+    """批量扫描汇总落盘为 JSON：统计 + 文件清单（含完整报告）+ 失败列表
+
+    results: (路径, Report.to_dict()) 列表（多进程 scan worker 返回 dict 形态，
+    与 HTML 汇总版对齐，避免跨进程传 Report 对象）。
+    """
     counts = {"clean": 0, "suspicious": 0, "malicious": 0}
-    for _, report in results:
-        level = report.risk_level.value
+    for _, report_dict in results:
+        level = report_dict.get("risk", {}).get("risk_level")
         if level in counts:
             counts[level] += 1
     data: dict[str, Any] = {
@@ -40,8 +44,10 @@ def write_scan_summary_json(
         "counts": counts,
         "total": len(results),
         "files": [
-            {"path": p, "report": report.to_dict()}
-            for p, report in sorted(results, key=lambda x: -x[1].total_score)
+            {"path": p, "report": report_dict}
+            for p, report_dict in sorted(
+                results, key=lambda x: -x[1].get("risk", {}).get("total_score", 0)
+            )
         ],
         "errors": errors,
     }

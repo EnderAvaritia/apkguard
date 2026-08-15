@@ -11,9 +11,10 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
@@ -28,6 +29,13 @@ from apkguard.output import console
 from apkguard.output.json_report import write_json_report, write_scan_summary_json
 from apkguard.static.apk_parser import analyze_file
 from apkguard.static.detectors.base import run_all_detectors
+
+# 单文件分析的估算内存需求：进程基座（androguard 导入等）+ 文件大小 × 膨胀系数。
+# 实测 Picacg 13MB → 峰值 195MB（约 15MB/MB）；大文件边际膨胀略低，取 12 保守。
+_SCAN_EST_BASE_MB = 150
+_SCAN_EST_PER_MB = 12
+# 内存预算 = 物理内存 × 50%（留一半给系统与其他程序）
+_SCAN_MEM_BUDGET_RATIO = 0.5
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -235,6 +243,91 @@ def cmd_analyze(args) -> int:
     return 0
 
 
+def _system_memory_mb() -> int:
+    """系统物理内存（MB）。尽力获取；失败返回保守默认 8192（8GB）。
+
+    Windows: GlobalMemoryStatusEx；Linux: /proc/meminfo。纯标准库实现。
+    """
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):  # noqa: N801 - ctypes 结构体命名约定
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = _MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(stat.ullTotalPhys / 1024 / 1024)
+        else:
+            with open("/proc/meminfo", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("MemTotal"):
+                        return int(line.split()[1]) // 1024  # kB → MB
+    except Exception:
+        pass
+    return 8192
+
+
+def _scan_est_mb(size_bytes: int) -> int:
+    """估算单文件分析峰值内存（MB）：进程基座 + 文件大小 × 膨胀系数"""
+    return _SCAN_EST_BASE_MB + int(size_bytes / 1024 / 1024 * _SCAN_EST_PER_MB)
+
+
+def _adaptive_workers(files: list[Path], requested: int, mem_budget_mb: int) -> int:
+    """按文件大小自适应并发：防止大文件并行叠加导致内存溢出。
+
+    约束：并发数 × 最大单文件估算 ≤ 内存预算。
+    请求并发为 1 时不缩减；结果为 [1, requested]。
+    """
+    if requested <= 1 or not files:
+        return max(1, requested)
+    largest_est = max(_scan_est_mb(p.stat().st_size) for p in files)
+    by_memory = max(1, mem_budget_mb // max(1, largest_est))
+    return max(1, min(requested, by_memory))
+
+
+def _scan_worker(
+    path_str: str,
+    severity: str,
+    rules_dir: str,
+    config_path: str,
+    explicit_device: str | None,
+    json_dir: str,
+) -> tuple[str, dict]:
+    """单文件扫描 worker（模块级：可被 ProcessPoolExecutor 在 Windows spawn 模式 pickle）。
+
+    参数全为基本类型/字符串；返回 (路径, Report.to_dict())。
+    失败抛异常，由调用方收集到 errors 列表。
+    """
+    from apkguard.output.json_report import write_json_report
+
+    config = Config(Path(config_path) if config_path else None)
+    if rules_dir:
+        config.set_rules_dir(rules_dir)
+    rules = load_rules(config.rules_dir)
+
+    p = Path(path_str)
+    app = analyze_file(p)
+    report = _make_report(app, config, severity, rules)
+    _attach_dynamic_status(report, config, explicit_device)
+    if json_dir:
+        out = Path(json_dir) / f"{p.stem}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        write_json_report(report, out)
+    return path_str, report.to_dict()
+
+
 def cmd_scan(args) -> int:
     config = _resolve_config(args)
     rules = load_rules(config.rules_dir)
@@ -260,28 +353,45 @@ def cmd_scan(args) -> int:
 
         workers = max(1, os.cpu_count() or 1)
 
+    # 大小感知并发：多进程隔离内存（每个 worker 独立进程，大文件不再共享叠加），
+    # 且按文件大小与物理内存预算自动限流，防止单文件估算 × 并发数 OOM。
+    mem_budget = int(_system_memory_mb() * _SCAN_MEM_BUDGET_RATIO)
+    effective_workers = _adaptive_workers(files, workers, mem_budget)
+    if effective_workers < workers:
+        console._c(
+            f"检测到大型样本，并发从 {workers} 自动降至 {effective_workers}（内存预算 {mem_budget}MB）/ "
+            f"Large samples detected; workers reduced {workers} → {effective_workers} "
+            f"(memory budget {mem_budget}MB)",
+            "yellow",
+        )
+    workers = effective_workers
+
     console._c(
-        f"开始批量扫描 {len(files)} 个文件，并发 {workers} / Scanning {len(files)} files with {workers} workers",
+        f"开始批量扫描 {len(files)} 个文件，并发 {workers}（多进程隔离）/ "
+        f"Scanning {len(files)} files with {workers} workers (isolated processes)",
         "cyan",
     )
-    results: list[tuple[str, Report]] = []
+    results: list[tuple[str, dict]] = []
     errors: list[str] = []
 
-    def scan_one(p: Path) -> tuple[str, Report]:
-        try:
-            app = analyze_file(p)
-            report = _make_report(app, config, args.severity, rules)
-            _attach_dynamic_status(report, config)
-            if args.json_dir:
-                out = Path(args.json_dir) / f"{p.stem}.json"
-                out.parent.mkdir(parents=True, exist_ok=True)
-                write_json_report(report, out)
-            return str(p), report
-        except Exception as e:
-            raise RuntimeError(f"{p}: {e}") from e
+    config_path = str(args.config) if getattr(args, "config", None) else ""
+    rules_dir = config.rules_dir
+    json_dir = str(args.json_dir) if args.json_dir else ""
+    explicit_device = getattr(args, "device", None)
 
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(scan_one, p): p for p in files}
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                _scan_worker,
+                str(p),
+                args.severity,
+                rules_dir,
+                config_path,
+                explicit_device,
+                json_dir,
+            ): p
+            for p in files
+        }
         for future in as_completed(futures):
             try:
                 results.append(future.result())
@@ -295,14 +405,34 @@ def cmd_scan(args) -> int:
         None,
         None,
         lambda p: write_scan_summary_json(results, errors, p, str(root)),
-        lambda p: _write_scan_summary_html(
-            [(path, r.to_dict()) for path, r in results], errors, str(root), p
-        ),
+        lambda p: _write_scan_summary_html(results, errors, str(root), p),
     )
     return 0
 
 
+def _setup_dynamic_logging() -> None:
+    """动态分析过程日志配置（幂等）：
+
+    - apkguard.dynamic → INFO 实时输出执行步骤（stderr，与报告 stdout 分离）
+    - 压制 androguard（loguru）DEBUG 刷屏——只保留 WARNING 及以上
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+        force=True,
+    )
+    try:
+        from loguru import logger as _loguru
+
+        _loguru.disable("androguard")
+    except ImportError:
+        pass  # 无 loguru（非 Windows/精简环境）无需压制
+
+
 def cmd_dynamic(args) -> int:
+    _setup_dynamic_logging()
     config = _resolve_config(args)
     path = Path(args.file)
     if not path.exists():
