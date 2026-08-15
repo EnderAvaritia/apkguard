@@ -110,6 +110,13 @@ class DynamicStatus:
     status: str = "not_executed"  # not_executed | executed | degraded | skipped
     note: str = ""  # 说明（如"未配置测试设备白名单，动态分析未执行"）
     findings: list[dict[str, Any]] = field(default_factory=list)
+    # ---- 执行结果（status == "executed" 时填充） ----
+    duration_seconds: Optional[int] = None  # 实际运行时长
+    traffic_endpoints: list[str] = field(default_factory=list)  # 采集到的网络端点（去重）
+    traffic_count: int = 0  # 捕获到的请求数
+    frida_hooked: bool = False  # Frida hook 是否成功采集
+    decoy_installed: bool = False  # 诱饵数据是否注入成功
+    cleanup_ok: bool = True  # 跑后清理是否完成（安全铁律 3）
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

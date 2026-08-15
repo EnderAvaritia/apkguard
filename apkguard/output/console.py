@@ -84,6 +84,28 @@ def print_analysis_report(report: Report) -> None:
         print(_c("  动态分析 / Dynamic Analysis", "bold"))
         if dyn.note:
             print(_c(f"    状态 / Status: {dyn.note}", "yellow"))
+        if dyn.executed:
+            print(
+                _c(
+                    f"    设备 / Device: {dyn.device_used}    时长 / Duration: "
+                    f"{dyn.duration_seconds}s    Frida: "
+                    f"{'是' if dyn.frida_hooked else '否'}    诱饵数据: "
+                    f"{'已注入' if dyn.decoy_installed else '未注入'}",
+                    "dim",
+                )
+            )
+            if dyn.traffic_endpoints:
+                print(
+                    _c(
+                        f"    网络端点 / Endpoints ({len(dyn.traffic_endpoints)}, "
+                        f"请求数 / Requests: {dyn.traffic_count}):",
+                        "cyan",
+                    )
+                )
+                for ep in dyn.traffic_endpoints[:15]:
+                    print(_c(f"      - {ep}", "cyan"))
+            if not dyn.cleanup_ok:
+                print(_c("    ⚠️ 跑后清理未完成！请手动卸载样本 / cleanup failed!", "red"))
 
     # Findings
     if report.findings:

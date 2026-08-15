@@ -522,6 +522,31 @@ def _render_dynamic(dyn: dict) -> str:
     if dyn.get("findings"):
         items = "".join(f"<li>{_esc(str(f))}</li>" for f in dyn["findings"])
         findings_html = f'<ul class="warn-list" style="margin-top:10px">{items}</ul>'
+    # 执行结果明细（status == executed 时展示）
+    result_html = ""
+    if executed == "是 / Yes":
+        duration = _text(str(dyn.get("duration_seconds")) + "s", "无 / None")
+        frida = "是 / Yes" if dyn.get("frida_hooked") else "否 / No"
+        decoy = "已注入 / Injected" if dyn.get("decoy_installed") else "未注入 / None"
+        cleanup = "完成 / Done" if dyn.get("cleanup_ok") else "失败！/ FAILED"
+        endpoints = dyn.get("traffic_endpoints") or []
+        ep_items = "".join(
+            f"<li>{_esc(ep)}</li>" for ep in endpoints[:20]
+        )
+        ep_block = (
+            f'<p class="meta-note" style="margin-top:10px">'
+            f'网络端点 / Endpoints ({len(endpoints)}, 请求数 / Requests: '
+            f'{dyn.get("traffic_count", 0)}):</p>'
+            f'<ul class="warn-list">{ep_items}</ul>' if endpoints else ""
+        )
+        result_html = f"""
+  <div class="kv-grid">
+    {_kv("运行时长 / Duration", duration)}
+    {_kv("Frida Hook", frida)}
+    {_kv("诱饵数据 / Decoy", decoy)}
+    {_kv("跑后清理 / Cleanup", f'<span class="{"ok" if dyn.get("cleanup_ok") else "danger"}">{_esc(cleanup)}</span>')}
+  </div>
+  {ep_block}"""
     return f"""
 <section class="card">
   <h2 class="card-title">动态分析 / Dynamic Analysis</h2>
@@ -533,6 +558,7 @@ def _render_dynamic(dyn: dict) -> str:
     {_kv("状态 / Status", label)}
   </div>
   <div class="note-box">{_esc(note)}</div>
+  {result_html}
   {findings_html}
 </section>"""
 

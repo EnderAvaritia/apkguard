@@ -44,6 +44,11 @@ dynamic:
   fake_gps: false       # 是否模拟位置
   use_frida: true       # 是否尝试 Frida hook（不可用时自动降级为系统层采集）
   install_decoy_data: true  # 是否预置诱饵数据（通讯录/短信/通话记录）
+  proxy_port: 8080      # 抓包代理端口（宿主机监听；设备经全局代理回连）
+  host_ip: ""           # 真机回连宿主机的 IP（留空 = 自动探测；模拟器自动用 10.0.2.2）
+  poll_interval: 5      # 智能终止轮询间隔（秒）
+  monkey_events: 200    # 每轮 monkey 随机事件数（UI 交互兜底）
+  monkey_interval: 30   # 两轮 monkey 交互之间的间隔（秒）
 
 # ============================================================
 # 可选增强模块（默认关闭，显式配置才启用 —— 隐私硬约束）

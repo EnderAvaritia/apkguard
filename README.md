@@ -51,7 +51,7 @@ python -m venv .venv
 # 自定义规则目录（复制 apkguard/rules/ 后修改）
 .venv\Scripts\python -m apkguard analyze app.apk --rules-dir ./my_rules/
 
-# 动态分析（第二阶段，当前仅状态标注）
+# 动态分析（第二阶段）：需先在 config.yaml 开启 dynamic.enabled 并配置测试设备
 .venv\Scripts\python -m apkguard dynamic app.apk
 
 # 显式指定 adb 设备（绕过 test_devices 白名单；报告会标注"绕过白名单"）
@@ -112,7 +112,11 @@ rules:
 
 > ⚠️ 安全卫生：`.gitignore` 已强制排除 `samples/` 等目录，真实恶意样本**绝不进入 git**。
 
-## 动态分析（第二阶段规划）/ Dynamic Analysis (Phase 2)
+## 动态分析（第二阶段）/ Dynamic Analysis (Phase 2)
+
+> **实现状态**：执行体已落地（v1）。`dynamic` 命令在 `dynamic.enabled: true`
+> 且有目标设备（白名单或 `--device` 显式指定）时真正安装运行样本；
+> `analyze` / `scan` 仍只做状态标注，不执行样本。
 
 | 维度 | 设计 |
 |---|---|
@@ -122,6 +126,21 @@ rules:
 | 交互 | monkey 随机点击兜底 → 定向 UI 自动化为主（弹窗授权优先点允许） |
 | 反沙箱 | 不硬刚；探测环境行为本身作为恶意信号上报 + 报告标注环境可信度 |
 | 智能终止 | 初始 5 分钟 / 活跃延长至多 15 分钟 / 静默 45 秒提前收网 |
+
+### 实现说明（v1）
+
+- **流量抓包**：宿主机 HTTP 代理（`proxy_port`）+ 设备全局代理。模拟器自动使用
+  `10.0.2.2`；真机需 `dynamic.host_ip` 或自动探测宿主机局域网 IP。HTTP 记录完整
+  URL，HTTPS 记录 CONNECT host:port 并透传隧道，不破坏样本网络行为。
+- **Frida**（可选）：`use_frida: true` 时若设备有 frida-server 则 hook
+  `Runtime.exec` / `SmsManager.sendTextMessage` / `DexClassLoader` / `URL`；
+  无 frida-server / 附加失败一律降级为系统层采集，不报错。
+- **授权策略**：`install -g` 预授权全部危险权限 + `pm grant` 兜底（等效"弹窗优先
+  点允许"），避免交互卡在权限弹窗。
+- **智能终止**：`initial_timeout` 后前台仍活跃则延长至 `max_timeout`；连续
+  `idle_timeout` 秒无前台/无流量提前收网。
+- **跑后清理**（安全铁律 3）：无论成功/异常，`finally` 必执行卸载样本 + 清除
+  设备全局代理；清理失败会在报告标注 `cleanup_ok: false`。
 
 ### ★ 测试设备白名单（安全铁律）
 
@@ -156,9 +175,15 @@ apkguard/
 │   └── detectors/      # 10 个内置检测器（Python 插件）
 ├── rules/              # YAML 规则库（用户可编辑）
 ├── engine/             # 规则引擎 / 打分分级 / 数据模型
-├── dynamic/            # 动态分析接口（第二阶段执行体）
-│   ├── backend.py          # 可插拔后端抽象
-│   └── device_manager.py   # 测试设备白名单隔离（安全核心）
+├── dynamic/            # 动态分析执行体（第二阶段）
+│   ├── backend.py          # 可插拔后端抽象 + 执行入口（预检/落盘）
+│   ├── device_manager.py   # 测试设备白名单隔离（安全核心）
+│   ├── adb_runner.py       # 按 -s serial 限定的 adb 封装（多设备安全）
+│   ├── executor.py         # 编排 + 智能终止 + 跑后清理
+│   ├── traffic.py          # 代理抓包（HTTP URL / HTTPS CONNECT 端点）
+│   ├── frida_collector.py  # 可选 Frida hook（无则降级系统层）
+│   ├── interaction.py      # pm grant 预授权 + monkey 交互
+│   └── decoy.py            # 诱饵数据（通讯录/短信/通话）
 └── output/             # 终端 / JSON / HTML 报告
 ```
 
@@ -169,6 +194,6 @@ Python 3.10+ · androguard 4.1.4 · PyYAML · pytest
 ## 开发状态 / Roadmap
 
 - [x] 第一版：静态分析引擎（解析 / 9 检测器 / 规则引擎 / 报告 / 测试）
-- [ ] 第二阶段：动态分析执行体（adb 后端 + 流量抓包 + Frida 采集 + UI 自动化）
+- [x] 第二阶段：动态分析执行体（adb 后端 + 代理抓包 + Frida 采集（可选降级）+ monkey 交互 + 智能终止 + 跑后清理）
 - [ ] 增强：壳检测（apkid 特征库）、本地 hash 比对、威胁情报查询（默认关闭）
 - [ ] AAB Manifest 精确 protobuf 解析（待真实样本验证）

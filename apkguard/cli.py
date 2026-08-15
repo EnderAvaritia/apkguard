@@ -18,7 +18,7 @@ from pathlib import Path
 
 from apkguard import __version__
 from apkguard.config import Config
-from apkguard.dynamic.backend import update_dynamic_status
+from apkguard.dynamic.backend import run_dynamic_analysis, update_dynamic_status
 from apkguard.dynamic.device_manager import DeviceManager
 from apkguard.engine.models import AnalyzedApp, Report
 from apkguard.engine.rule_engine import RuleSet, load_rules
@@ -228,10 +228,25 @@ def cmd_dynamic(args) -> int:
     app = analyze_file(path)
     rules = load_rules(config.rules_dir)
     report = _make_report(app, config, "low", rules)
-    _attach_dynamic_status(report, config, args.device)
+    dm = DeviceManager(config.test_devices, explicit_device=args.device)
+
+    if config.dynamic_enabled:
+        result = run_dynamic_analysis(report, dm, config.dynamic_options, path, app)
+        if not result.get("executed"):
+            console._c(
+                "提示：动态分析预检未通过，仅做状态标注（见报告 Dynamic 部分）/ "
+                "Dynamic analysis pre-check failed; status annotated only",
+                "yellow",
+            )
+    else:
+        update_dynamic_status(report, dm, config.dynamic_options)
+        console._c(
+            "提示：动态分析开关未开启（config.yaml: dynamic.enabled）。开启后本命令将真正"
+            "在测试设备上安装运行样本 / Dynamic analysis disabled in config.yaml",
+            "yellow",
+        )
 
     console.print_analysis_report(report)
-    console._c("提示：动态分析执行体将在第二阶段交付 / Dynamic executor lands in phase 2", "yellow")
     return 0
 
 
