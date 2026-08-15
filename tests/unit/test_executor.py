@@ -26,6 +26,7 @@ class FakeRunner:
         self.foreground: str | None = None
         self.has_package: bool = False  # 设备上是否已有同包名应用
         self.installed_version: str | None = "100"  # 设备上已有包的 versionCode
+        self.launcher_activity: str | None = None  # resolve_launcher_activity 返回值
 
     def install(self, apk_path, grant_permissions=True):
         self.calls.append(("install", str(apk_path), grant_permissions))
@@ -55,6 +56,10 @@ class FakeRunner:
     def start_activity(self, package, activity):
         self.calls.append(("start_activity", package, activity))
         return True
+
+    def resolve_launcher_activity(self, package):
+        self.calls.append(("resolve_launcher_activity", package))
+        return self.launcher_activity  # None 或 "pkg/pkg.Main" 形式
 
     def foreground_package(self):
         return self.foreground
@@ -337,3 +342,43 @@ class TestExecutorRun:
         )
         assert result["status"] == "executed"
         assert not any(c[0] == "start_activity" for c in runner.calls)
+
+    def test_activity_driving_excludes_launcher(self):
+        """launcher activity（MainActivity）已由 launch() 打开，驱动时排除——
+        避免对已启动的程序再 am start 一次变成"重启程序"而非"跳转界面" """
+        runner = FakeRunner()
+        runner.launcher_activity = "com.x/com.x.MainActivity"
+        ex = DynamicExecutor(runner, make_options())
+        result = ex.run(
+            Path("sample.apk"),
+            "com.x",
+            [],
+            activities=["com.x.MainActivity", "com.x.Settings"],
+            exported_activities=["com.x.MainActivity", "com.x.Settings"],
+        )
+        assert result["status"] == "executed"
+        started_acts = [c[2] for c in runner.calls if c[0] == "start_activity"]
+        assert started_acts == ["com.x.Settings"]  # MainActivity 被排除，不重复启动
+        assert "launched 1/1" in " ".join(result["notes"])
+
+    def test_dynamic_process_logged_to_logger(self, caplog):
+        """动态分析关键步骤实时输出到 apkguard.dynamic 日志（INFO 级）"""
+        import logging
+
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options())
+        with caplog.at_level(logging.INFO, logger="apkguard.dynamic"):
+            result = ex.run(
+                Path("sample.apk"), "com.malware.sample",
+                ["android.permission.SEND_SMS"],
+            )
+        assert result["status"] == "executed"
+        messages = caplog.messages
+        # 关键步骤应有对应日志行
+        assert any("installed" in m for m in messages)
+        assert any("pm granted" in m for m in messages)
+        assert any("proxy" in m for m in messages)
+        assert any("terminated at" in m for m in messages)
+        # 清理（安全铁律 3）成功也记录
+        assert any("uninstalled" in m for m in messages)
+        assert any("proxy reset" in m for m in messages)

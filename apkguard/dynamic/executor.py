@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -28,6 +29,9 @@ from apkguard.dynamic.interaction import (
     pre_grant_permissions,
 )
 from apkguard.dynamic.traffic import ProxyCapture, resolve_proxy_target
+
+# 动态分析过程日志（CLI 配置级别；INFO 输出执行步骤，DEBUG 输出 adb 细节）
+logger = logging.getLogger("apkguard.dynamic")
 
 
 def should_stop(
@@ -90,6 +94,11 @@ class DynamicExecutor:
     def _opt(self, key: str, default):
         return self._options.get(key, default)
 
+    def _note(self, notes: list[str], message: str) -> None:
+        """记录过程信息：写入报告 notes + 实时输出到动态分析日志"""
+        logger.info(message)
+        notes.append(message)
+
     # ---- 主流程 ----
 
     def run(
@@ -132,7 +141,7 @@ class DynamicExecutor:
             if self._runner.package_installed(package):
                 installed_code = self._runner.installed_package_version_code(package)
                 if version_code and installed_code and version_code == installed_code:
-                    notes.append(
+                    self._note(notes, 
                         f"existing package {package} same version ({version_code}); "
                         "skip install, test as-is"
                     )
@@ -151,7 +160,7 @@ class DynamicExecutor:
                         "notes": notes + ["existing package refused"],
                     }
                 else:
-                    notes.append("existing package found with different version; uninstalling before install")
+                    self._note(notes, "existing package found with different version; uninstalling before install")
                     if not self._runner.uninstall(package):
                         return {
                             "status": "degraded",
@@ -171,20 +180,20 @@ class DynamicExecutor:
                     }
             else:
                 installed = True  # 已在设备上（同版本），跑后清理仍会卸载
-            notes.append("installed")
+            self._note(notes, "installed")
 
             # 2) 危险权限兜底 pm grant
             granted = pre_grant_permissions(
                 self._runner, package, dangerous_permissions or []
             )
             if granted:
-                notes.append(f"pm granted {len(granted)} permissions")
+                self._note(notes, f"pm granted {len(granted)} permissions")
 
             # 3) 诱饵数据
             if self._opt("install_decoy_data", True):
                 decoy_detail = install_decoy_data(self._runner)
                 decoy_installed = any(decoy_detail.values())
-                notes.append(
+                self._note(notes, 
                     f"decoy: {decoy_detail.get('contacts', 0)} contacts, "
                     f"{decoy_detail.get('sms', 0)} sms, "
                     f"{decoy_detail.get('call_log', 0)} call_log"
@@ -204,37 +213,45 @@ class DynamicExecutor:
                 proxy_host, proxy_port = proxy_addr.rsplit(":", 1)
                 if capture.start() and self._runner.set_global_proxy(proxy_host, int(proxy_port)):
                     proxy_set = True
-                    notes.append(f"proxy {proxy_addr}")
+                    self._note(notes, f"proxy {proxy_addr}")
                     baseline_seconds = max(0, int(self._opt("baseline_seconds", 10)))
                     if baseline_seconds > 0:
                         # 样本启动前先采集环境流量，跑完后差集即样本相关端点
                         time.sleep(baseline_seconds)
                         baseline_endpoints = list(capture.endpoints)
                         baseline_count = capture.count
-                        notes.append(
+                        self._note(notes, 
                             f"baseline captured {len(baseline_endpoints)} ambient endpoints"
                         )
                 else:
                     capture.stop()
-                    notes.append("proxy unavailable (capture skipped)")
+                    self._note(notes, "proxy unavailable (capture skipped)")
             else:
-                notes.append("no proxy target (real device without host_ip; capture skipped)")
+                self._note(notes, "no proxy target (real device without host_ip; capture skipped)")
 
             # 5) 启动 App
             launched = self._runner.launch(package)
             if not launched:
-                notes.append("launch failed (best-effort continue)")
+                self._note(notes, "launch failed (best-effort continue)")
 
             # 5.5) 随机唤起 activity（强制执行更多代码路径）
             #      默认只唤起"可被外部唤起"的（exported=true / 带 intent-filter），
             #      避免误触发非导出内部组件的副作用路径或缺 extras 的噪音崩溃；
             #      显式配置 interact_hidden_activities: true 才随机唤起全部。
+            #      同时排除 launcher activity（MainActivity）——它已由 launch()
+            #      打开，再 am start 一次等于"重启整个程序"而非"跳转界面"；
+            #      其余 activity 在同一 task 栈内压栈导航（返回键可回退）。
             activity_pool = activities or []
             hidden = self._opt("interact_hidden_activities", False)
             drive_list = activity_pool if hidden else (exported_activities or [])
+            if drive_list:
+                launcher = self._runner.resolve_launcher_activity(package)
+                if launcher and "/" in launcher:
+                    launcher_name = launcher.split("/", 1)[1]
+                    drive_list = [a for a in drive_list if a != launcher_name]
             if self._opt("interact_activities", True) and drive_list:
                 activity_launched = drive_activities(self._runner, package, drive_list)
-                notes.append(
+                self._note(notes, 
                     f"activity driving: launched {len(activity_launched)}/{len(drive_list)}"
                     f" ({'all' if hidden else 'exported-only'})"
                 )
@@ -252,7 +269,7 @@ class DynamicExecutor:
 
                 threading.Thread(target=_run_frida, daemon=True).start()
             elif use_frida:
-                notes.append("frida unavailable (system-level collection only)")
+                self._note(notes, "frida unavailable (system-level collection only)")
 
             # 7) 交互 + 智能终止轮询
             self._interact_and_wait(package, capture, started, notes)
@@ -261,12 +278,12 @@ class DynamicExecutor:
             if frida_holder.get("result") is not None:
                 frida_result = frida_holder["result"]
             if frida_result.hooked:
-                notes.append(f"frida hooked {len(frida_result.messages)} events")
+                self._note(notes, f"frida hooked {len(frida_result.messages)} events")
             elif frida_result.note:
-                notes.append(f"frida degraded: {frida_result.note}")
+                self._note(notes, f"frida degraded: {frida_result.note}")
 
         except Exception as e:  # noqa: BLE001 - 执行体承诺永不抛异常，全部降级
-            notes.append(f"unexpected error: {e}")
+            self._note(notes, f"unexpected error: {e}")
             return {
                 "status": "degraded",
                 "note": f"动态分析异常中断 / dynamic analysis failed: {e}",
@@ -277,11 +294,15 @@ class DynamicExecutor:
             if installed:
                 cleanup_ok = self._runner.uninstall(package)
                 if not cleanup_ok:
-                    notes.append("uninstall failed!")
+                    self._note(notes, "uninstall failed!")
+                else:
+                    logger.info(f"cleanup: uninstalled {package}")
             if proxy_set:
                 if not self._runner.clear_global_proxy():
                     cleanup_ok = False
-                    notes.append("proxy reset failed!")
+                    self._note(notes, "proxy reset failed!")
+                else:
+                    logger.info("cleanup: device proxy reset")
             capture.stop()
 
         all_endpoints = capture.endpoints
@@ -348,7 +369,7 @@ class DynamicExecutor:
                 max_timeout=max_t,
                 idle_timeout=idle_t,
             ):
-                notes.append(
+                self._note(notes, 
                     f"terminated at {int(elapsed)}s ("
                     f"{termination_reason(elapsed, now - last_active, initial, max_t, idle_t)})"
                 )
@@ -356,4 +377,8 @@ class DynamicExecutor:
 
             if now >= next_monkey:
                 drive_interaction(self._runner, package, events=monkey_events, foreground=fg)
+                logger.info(
+                    f"interaction: monkey {monkey_events} events @ {int(now - started)}s "
+                    f"(foreground={fg or 'unknown'})"
+                )
                 next_monkey = now + monkey_interval

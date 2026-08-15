@@ -35,9 +35,11 @@ def drive_activities(
     activities: list[str],
     shuffle: bool = True,
 ) -> list[str]:
-    """随机顺序逐个唤起给定 activity 列表；返回成功启动的组件列表。
+    """随机顺序逐个唤起给定 activity；返回成功启动的组件列表。
 
-    - 传入的列表由调用方决定（默认=可导出集合，见 executor）
+    - 传入的列表由调用方决定：默认=可导出集合且已排除 launcher activity（见
+      executor——launcher 已由 launch() 打开，再 am start 一次等于"重启程序"
+      而非"跳转界面"）
     - shuffle=True：每次运行顺序不同，避免固定路径
     - best-effort：无法启动/崩溃一律忽略（崩溃本身也是行为证据，
       由 logcat/后续采集兜底）
