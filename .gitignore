@@ -35,11 +35,15 @@ Thumbs.db
 # 配置文件中的本地覆盖
 config.local.yaml
 
-# ���߻Ự/����Ŀ¼
+# ���߻Ự/����Ŀ¼
 .codegraph/
 .omo/
 
 
-# �������ﱨ��
+# 分析产物报告（JSON/HTML，按文件名或目录）
 report*.json
 report*.html
+box-*.json
+box-*.html
+smoke*.json
+smoke*.html

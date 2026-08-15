@@ -16,6 +16,7 @@ from apkguard.static.detectors.accessibility import AccessibilityDetector
 from apkguard.static.detectors.antiav_evasion import AntiavEvasionDetector
 from apkguard.static.detectors.c2_network import C2NetworkDetector
 from apkguard.static.detectors.data_exfil import DataExfilDetector
+from apkguard.static.detectors.destructive_ops import DestructiveOpsDetector
 from apkguard.static.detectors.dynamic_loading import DynamicLoadingDetector
 from apkguard.static.detectors.overlay import OverlayDetector
 from apkguard.static.detectors.permissions import PermissionsDetector
@@ -243,11 +244,91 @@ class TestAntiavEvasionDetector:
         )
 
 
+class TestDestructiveOpsDetector:
+    def test_cross_directory_read_write(self, rules):
+        """危险路径 + 文件 API 同现 → 跨目录读写 HIGH"""
+        app = make_app(
+            called_methods={"Ljava/io/File;->openFileInput()"},
+            strings={"/data/data/com.target.app/databases/secret.db"},
+        )
+        findings = DestructiveOpsDetector().detect(app, rules)
+        assert any("跨目录" in f.title for f in findings)
+        hit = [f for f in findings if "跨目录" in f.title][0]
+        assert hit.severity.value == "high"
+        assert hit.weight == 4
+
+    def test_dangerous_path_string_only_low(self, rules):
+        """仅有危险路径字符串（无文件 API）→ 低权提示"""
+        app = make_app(
+            strings={"/data/system/packages.xml"},
+        )
+        findings = DestructiveOpsDetector().detect(app, rules)
+        assert any("硬编码" in f.title for f in findings)
+        hit = [f for f in findings if "硬编码" in f.title][0]
+        assert hit.severity.value == "low"
+        assert hit.weight == 1
+
+    def test_execsql_drop_table_high(self, rules):
+        """execSQL + DROP TABLE → 删库 HIGH"""
+        app = make_app(
+            called_methods={
+                "Landroid/database/sqlite/SQLiteDatabase;->execSQL(Ljava/lang/String;)V"
+            },
+            strings={"DROP TABLE IF EXISTS user_info"},
+        )
+        findings = DestructiveOpsDetector().detect(app, rules)
+        assert any("删库" in f.title for f in findings)
+        hit = [f for f in findings if "删库" in f.title][0]
+        assert hit.severity.value == "high"
+
+    def test_delete_database_medium(self, rules):
+        """单独 deleteDatabase → 中权（无 SQL 字符串）"""
+        app = make_app(
+            called_methods={
+                "Landroid/content/ContextWrapper;->deleteDatabase(Ljava/lang/String;)Z"
+            },
+        )
+        findings = DestructiveOpsDetector().detect(app, rules)
+        assert any("删除" in f.title for f in findings)
+        hit = [f for f in findings if "删除" in f.title][0]
+        assert hit.severity.value == "medium"
+        assert hit.weight == 2
+
+    def test_device_admin_wipe_high(self, rules):
+        """DevicePolicyManager.wipeData → 远程擦除 HIGH"""
+        app = make_app(
+            called_methods={
+                "Landroid/app/admin/DevicePolicyManager;->wipeData(I)V"
+            },
+            declared_permissions={"android.permission.BIND_DEVICE_ADMIN"},
+            classes=["com.malware.AdminReceiver"],
+        )
+        findings = DestructiveOpsDetector().detect(app, rules)
+        assert any("擦除" in f.title for f in findings)
+        hit = [f for f in findings if "擦除" in f.title][0]
+        assert hit.weight == 4
+
+    def test_file_delete_alone_no_finding(self, rules):
+        """单独 File.delete()（无危险路径）→ 不误报（清缓存等合法常见）"""
+        app = make_app(
+            called_methods={"Ljava/io/File;->delete()Z"},
+            strings={"cache"},
+        )
+        assert DestructiveOpsDetector().detect(app, rules) == []
+
+    def test_clean_app_no_finding(self, rules):
+        app = make_app(
+            called_methods={"Ljava/lang/String;->length()I"},
+            strings={"hello world"},
+        )
+        assert DestructiveOpsDetector().detect(app, rules) == []
+
+
 class TestDetectorRegistry:
-    def test_all_9_detectors_registered(self):
+    def test_all_10_detectors_registered(self):
         ids = {d.detector_id for d in get_detectors()}
         assert ids == {
             "permissions", "dynamic_loading", "accessibility", "overlay",
             "sms_telephony", "data_exfil", "c2_network", "signature",
-            "antiav_evasion",
+            "antiav_evasion", "destructive_ops",
         }

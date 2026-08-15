@@ -58,6 +58,7 @@ def register_detectors() -> None:
         antiav_evasion,
         c2_network,
         data_exfil,
+        destructive_ops,
         dynamic_loading,
         overlay,
         permissions,
