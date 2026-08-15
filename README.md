@@ -57,6 +57,9 @@ python -m venv .venv
 # 显式指定 adb 设备（绕过 test_devices 白名单；报告会标注"绕过白名单"）
 .venv\Scripts\python -m apkguard dynamic app.apk --device emulator-5554
 .venv\Scripts\python -m apkguard analyze app.apk --device 0123456789ABCDEF
+
+# 跳过静态检测与打分，只解析包名/权限后直接动态分析（样本大/只关心动态行为时提速）
+.venv\Scripts\python -m apkguard dynamic app.apk --device emulator-5554 --no-static
 ```
 
 > Windows 控制台中文乱码时，请使用 Windows Terminal，或先执行 `chcp 65001`。

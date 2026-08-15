@@ -68,6 +68,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_dynamic.add_argument("--config", default=None, metavar="config.yaml", help="自定义配置文件")
     p_dynamic.add_argument("--device", default=None, metavar="SERIAL",
                            help="显式指定 adb 设备（绕过 test_devices 白名单）")
+    p_dynamic.add_argument("--no-static", action="store_true",
+                           help="跳过静态检测与打分，仅解析包名/权限后直接动态分析")
 
     return parser
 
@@ -79,8 +81,36 @@ def _resolve_config(args) -> Config:
     return config
 
 
-def _make_report(app: AnalyzedApp, config: Config, severity: str, rules: RuleSet) -> Report:
-    """解析结果 → 检测 → 打分分级 → Report"""
+def _make_report(
+    app: AnalyzedApp, config: Config, severity: str, rules: RuleSet | None
+) -> Report:
+    """解析结果 → 检测 → 打分分级 → Report。
+
+    rules=None（--no-static）：跳过全部静态检测与打分，只保留解析产物
+    （包名/权限/签名等，动态执行仍需），报告标注"静态分析已跳过"。
+    """
+    if rules is None:
+        warnings = list(app.parse_warnings) + [
+            "静态分析已跳过（--no-static）/ Static analysis skipped (--no-static)"
+        ]
+        return Report(
+            file_name=Path(app.file_path).name,
+            file_format=app.file_format,
+            file_size=app.file_size,
+            sha256=app.sha256,
+            package=app.package,
+            app_name=app.app_name,
+            version=app.version,
+            min_sdk=app.min_sdk,
+            target_sdk=app.target_sdk,
+            permissions=[],
+            all_permissions=sorted(app.declared_permissions),
+            network_endpoints=[],
+            signature=app.signature,
+            parse_warnings=warnings,
+            severity_profile=severity,
+        )
+
     findings = run_all_detectors(app, rules)
     report = Report(
         file_name=Path(app.file_path).name,
@@ -226,8 +256,15 @@ def cmd_dynamic(args) -> int:
         return 1
 
     app = analyze_file(path)
-    rules = load_rules(config.rules_dir)
+    no_static = getattr(args, "no_static", False)
+    rules = None if no_static else load_rules(config.rules_dir)
     report = _make_report(app, config, "low", rules)
+    if no_static:
+        console._c(
+            "提示：静态分析已跳过（--no-static），报告仅含动态结果 / "
+            "Static analysis skipped; dynamic results only",
+            "yellow",
+        )
     dm = DeviceManager(config.test_devices, explicit_device=args.device)
 
     if config.dynamic_enabled:

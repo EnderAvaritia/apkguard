@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from apkguard.dynamic.backend import run_dynamic_analysis  # noqa: E402
 from apkguard.dynamic.device_manager import DeviceManager  # noqa: E402
 from apkguard.engine.models import AnalyzedApp, DynamicStatus, Report  # noqa: E402
+from apkguard.config import Config  # noqa: E402
 
 
 def make_report() -> Report:
@@ -106,3 +107,31 @@ class TestRunDynamicAnalysis:
         result = run_dynamic_analysis(report, dm, {"enabled": True}, Path("t.apk"), make_app())
         assert report.dynamic.status == "executed"
         assert report.dynamic.device_used == "emulator-5554"
+
+
+class TestMinimalReportNoStatic:
+    """--no-static：rules=None 时跳过全部静态检测，只保留解析产物"""
+
+    def test_no_static_skips_detectors(self):
+        from apkguard.cli import _make_report
+
+        app = make_app()
+        report = _make_report(app, Config(Path("nonexistent.yaml")), "low", None)
+        assert report.findings == []
+        assert report.network_endpoints == []
+        assert report.total_score == 0
+        assert report.package == "com.malware.sample"  # 包名保留（动态执行需要）
+        assert any("已跳过" in w for w in report.parse_warnings)
+
+    def test_no_static_keeps_all_permissions(self):
+        from apkguard.cli import _make_report
+
+        app = AnalyzedApp(
+            file_path="t.apk", file_format="APK", file_size=1, sha256="x" * 64,
+            package="com.malware.sample",
+            dangerous_permissions=["android.permission.SEND_SMS"],
+            declared_permissions={"android.permission.SEND_SMS", "android.permission.INTERNET"},
+        )
+        report = _make_report(app, Config(Path("nonexistent.yaml")), "low", None)
+        # 声明的权限仍保留（pm grant 预授权需要）
+        assert "android.permission.SEND_SMS" in report.all_permissions
