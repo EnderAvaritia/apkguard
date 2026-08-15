@@ -61,8 +61,9 @@ class TestWriteReports:
             lambda p: Path(p).write_text("{}", encoding="utf-8"),
             lambda p: Path(p).write_text("<html></html>", encoding="utf-8"),
         )
-        assert (tmp_path / "app.json").exists()
-        assert (tmp_path / "app.html").exists()
+        # 默认输出统一进 reports/ 子目录（gitignore 忽略，报告不进版本控制）
+        assert (tmp_path / "reports" / "app.json").exists()
+        assert (tmp_path / "reports" / "app.html").exists()
 
     def test_custom_names(self, tmp_path, monkeypatch):
         from apkguard.cli import _write_report_files
@@ -78,7 +79,7 @@ class TestWriteReports:
         assert not (tmp_path / "app.json").exists()
 
     def test_scan_summary_naming(self, tmp_path, monkeypatch):
-        """scan 通过同一助手写 scan_summary.json/html"""
+        """scan 通过同一助手写 reports/scan_summary.json/html"""
         from apkguard.cli import _write_report_files
 
         monkeypatch.chdir(tmp_path)
@@ -87,8 +88,8 @@ class TestWriteReports:
             lambda p: Path(p).write_text("{}", encoding="utf-8"),
             lambda p: Path(p).write_text("<html></html>", encoding="utf-8"),
         )
-        assert (tmp_path / "scan_summary.json").exists()
-        assert (tmp_path / "scan_summary.html").exists()
+        assert (tmp_path / "reports" / "scan_summary.json").exists()
+        assert (tmp_path / "reports" / "scan_summary.html").exists()
 
     def test_html_import_error_degrades_gracefully(self, tmp_path, monkeypatch, capsys):
         """HTML 模块不可用（抛 ImportError）时 JSON 照写、仅警告"""
@@ -100,8 +101,8 @@ class TestWriteReports:
             raise ImportError("html_report unavailable")
 
         _write_report_files("app", None, None, lambda p: Path(p).write_text("{}", encoding="utf-8"), boom)
-        assert (tmp_path / "app.json").exists()
-        assert not (tmp_path / "app.html").exists()
+        assert (tmp_path / "reports" / "app.json").exists()
+        assert not (tmp_path / "reports" / "app.html").exists()
         assert "警告" in capsys.readouterr().err
 
 

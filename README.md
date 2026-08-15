@@ -36,14 +36,15 @@ python -m venv .venv
 
 ```bash
 # 单文件分析：终端输出详情 + 默认生成 <文件名>.json 与 <文件名>.html 报告
-# （如 app.apk → app.json / app.html，均按输入文件名命名）
+# （如 app.apk → reports/app.json / reports/app.html，统一输出到 reports/ 目录，
+#   该目录已被 .gitignore 忽略，报告不进版本控制）
 .venv\Scripts\python -m apkguard analyze path/to/app.apk
 
-# 指定报告文件名（覆盖默认命名）
+# 指定报告文件名（覆盖默认命名与默认 reports/ 目录）
 .venv\Scripts\python -m apkguard analyze app.apk --json my_report.json --html my_report.html
 
 # 批量扫描目录（--workers 指定并发，默认自动探测 CPU 核数）
-# 结束后自动输出 scan_summary.json / scan_summary.html 批量汇总报告
+# 结束后自动输出 reports/scan_summary.json / reports/scan_summary.html 批量汇总报告
 .venv\Scripts\python -m apkguard scan ./apk_folder/
 
 # 指定阈值档位（low 少漏报 / normal 标准 / high 少误报）
@@ -53,7 +54,7 @@ python -m venv .venv
 .venv\Scripts\python -m apkguard analyze app.apk --rules-dir ./my_rules/
 
 # 动态分析（第二阶段）：需先在 config.yaml 开启 dynamic.enabled 并配置测试设备
-# 默认自动输出 <输入名>.json 与 <输入名>.html 报告（--json/--html 可指定路径）
+# 默认自动输出 reports/<输入名>.json 与 reports/<输入名>.html 报告（--json/--html 可指定路径）
 .venv\Scripts\python -m apkguard dynamic app.apk
 
 # 显式指定 adb 设备（绕过 test_devices 白名单；报告会标注"绕过白名单"）

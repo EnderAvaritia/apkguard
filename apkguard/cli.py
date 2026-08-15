@@ -189,14 +189,19 @@ def _write_report_files(
 
     - analyze / dynamic：default_base=输入文件名（去扩展名），--json/--html 覆盖
     - scan：default_base="scan_summary"，无覆盖参数，写批量汇总
+    - 默认输出到项目根目录的 reports/ 子目录（.gitignore 已忽略，报告不进版本控制）；
+      显式 --json/--html 路径按用户指定（父目录自动创建）
 
     默认命名、路径覆盖、HTML 模块缺失的优雅降级统一在这里处理。
     """
-    json_out = Path(json_arg) if json_arg else Path(f"{default_base}.json")
+    report_dir = Path("reports")
+    json_out = Path(json_arg) if json_arg else report_dir / f"{default_base}.json"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
     write_json(json_out)
     print(f"JSON 报告已写入 / JSON report written: {json_out}")
 
-    html_out = Path(html_arg) if html_arg else Path(f"{default_base}.html")
+    html_out = Path(html_arg) if html_arg else report_dir / f"{default_base}.html"
+    html_out.parent.mkdir(parents=True, exist_ok=True)
     try:
         write_html(html_out)
         print(f"HTML 报告已写入 / HTML report written: {html_out}")
