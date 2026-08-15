@@ -1,0 +1,61 @@
+# apkguard 全局配置
+# 中英双语说明：本文件为 YAML 格式，所有注释给出中文说明
+
+# 风险分级阈值档位（severity profile）
+# low:    低阈值，少漏报（默认）——宁可多标可疑，不漏恶意
+# normal: 标准阈值
+# high:   高阈值，少误报——只报警证据确凿的
+severity_profiles:
+  low:
+    clean_below: 4        # 总分 < 4 → 干净
+    malicious_at: 8       # 总分 >= 8 → 恶意；中间为可疑
+  normal:
+    clean_below: 8
+    malicious_at: 15
+  high:
+    clean_below: 15
+    malicious_at: 25
+
+# 规则目录（YAML 规则文件所在路径，可被 --rules-dir 覆盖）
+rules_dir: "rules"
+
+# 批量扫描并发数（0 = 自动探测 CPU 核数）
+scan_workers: 0
+
+# ============================================================
+# 动态分析（第二阶段）
+# ============================================================
+
+# ★ 测试设备白名单（安全隔离铁律）
+# 只有列在这里的设备才会被用于运行恶意样本。
+# 列表为空 → 动态分析永不自动触发（默认安全状态）。
+# 你长期连接的工作模拟器/真机绝不会出现在白名单中，程序对其只读不碰。
+# 注意：序列号通过 `adb devices` 查看（如 emulator-5554 / 0123456789ABCDEF）
+test_devices: []
+
+# 动态分析默认参数（智能终止策略）
+dynamic:
+  enabled: false        # 全局开关（false = 动态分析禁用；改为 true 前请先配置 test_devices）
+  initial_timeout: 300  # 初始运行时长（秒），默认 5 分钟
+  max_timeout: 900      # 活跃时最多延长到（秒），默认 15 分钟
+  idle_timeout: 45      # 静默多少秒后提前收网
+  fake_gps: false       # 是否模拟位置
+  use_frida: true       # 是否尝试 Frida hook（不可用时自动降级为系统层采集）
+  install_decoy_data: true  # 是否预置诱饵数据（通讯录/短信/通话记录）
+
+# ============================================================
+# 可选增强模块（默认关闭，显式配置才启用 —— 隐私硬约束）
+# ============================================================
+enhancements:
+  # 已知恶意 hash 比对（本地 hash 库，不上传任何数据）
+  hash_check:
+    enabled: false
+    database: "malware_hashes.txt"  # 每行一个 sha256
+
+  # 外部威胁情报查询（会联网查询端点信誉，不传 APK 文件）
+  # ⚠️ 隐私硬约束：默认禁止一切上传。以下任何选项配置为 true 都意味着
+  #    你显式允许程序进行外部网络交互，请确认你理解这一点。
+  threat_intel:
+    enabled: false
+    provider: ""  # 留空 = 不启用；未来支持的 provider 见文档
+    api_key: ""   # 由用户自行配置

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# 测试与缓存
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 恶意样本目录 - 真实样本绝不进 git（安全卫生）
+samples/
+real_samples/
+*.apk
+*.aab
+
+# 分析产物
+reports/
+*.html.bak
+
+# 编辑器/系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 配置文件中的本地覆盖
+config.local.yaml
+
+# ���߻Ự/����Ŀ¼
+.codegraph/
+.omo/
+
