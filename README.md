@@ -53,6 +53,10 @@ python -m venv .venv
 
 # 动态分析（第二阶段，当前仅状态标注）
 .venv\Scripts\python -m apkguard dynamic app.apk
+
+# 显式指定 adb 设备（绕过 test_devices 白名单；报告会标注"绕过白名单"）
+.venv\Scripts\python -m apkguard dynamic app.apk --device emulator-5554
+.venv\Scripts\python -m apkguard analyze app.apk --device 0123456789ABCDEF
 ```
 
 > Windows 控制台中文乱码时，请使用 Windows Terminal，或先执行 `chcp 65001`。
@@ -129,6 +133,11 @@ rules:
 3. **跑后清理**：动态分析结束自动卸载样本、清理采集文件
 
 `test_devices` 为空时动态分析永不自动触发（默认安全状态）。
+
+> ⚠️ **显式指定覆盖**：CLI 参数 `--device <serial>`（`analyze` / `dynamic` 子命令）
+> 显式指定设备时**绕过白名单门槛**——这是用户明确授权的高风险操作，报告会如实标注
+> "绕过白名单"以便审计。`--device` 指定设备不在线时不会静默回退到其他设备。
+> 除此以外的任何设备仍受白名单铁律约束。
 
 ### 隐私硬约束
 

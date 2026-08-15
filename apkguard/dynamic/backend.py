@@ -74,11 +74,11 @@ def update_dynamic_status(report: Report, device_manager: DeviceManager, options
     dyn = report.dynamic
     dyn.enabled = bool(options.get("enabled", False))
 
-    if not device_manager.has_whitelist:
+    if not (device_manager.has_whitelist or device_manager.has_explicit_device):
         dyn.status = "skipped"
         dyn.note = (
-            "未配置测试设备白名单，动态分析未执行（隐私安全默认状态）/ "
-            "No test device whitelist configured; dynamic analysis skipped (secure default)"
+            "未配置测试设备白名单且未显式指定设备，动态分析未执行（隐私安全默认状态）/ "
+            "No test device whitelist or explicit device; dynamic analysis skipped (secure default)"
         )
         return
 
@@ -93,17 +93,31 @@ def update_dynamic_status(report: Report, device_manager: DeviceManager, options
     online = device_manager.get_online_test_device()
     if online is None:
         dyn.status = "skipped"
-        dyn.note = (
-            f"已配置测试设备白名单但无设备在线，动态分析未执行 / "
-            f"Test devices configured but none online; dynamic analysis skipped"
-        )
+        if device_manager.has_explicit_device:
+            dyn.note = (
+                f"显式指定设备 {device_manager.explicit_device} 不在线，动态分析未执行 / "
+                f"Explicitly specified device {device_manager.explicit_device} offline; "
+                f"dynamic analysis skipped"
+            )
+        else:
+            dyn.note = (
+                f"已配置测试设备白名单但无设备在线，动态分析未执行 / "
+                f"Test devices configured but none online; dynamic analysis skipped"
+            )
         return
 
-    # 有白名单设备在线 → 状态为"待第二阶段执行"
+    # 有可用设备（白名单或显式指定）在线 → 状态为"待第二阶段执行"
     dyn.status = "degraded"
     dyn.device_used = online.serial
     dyn.backend = "adb"
-    dyn.note = (
-        f"检测到测试设备 {online.serial} 在线；动态执行体将在第二阶段交付，"
-        f"本次未执行 / Test device {online.serial} online; dynamic executor lands in phase 2"
-    )
+    if device_manager.has_explicit_device:
+        dyn.note = (
+            f"显式指定设备 {online.serial}（绕过白名单）在线；动态执行体将在第二阶段交付，"
+            f"本次未执行 / Explicitly specified device {online.serial} (whitelist bypass) online; "
+            f"dynamic executor lands in phase 2"
+        )
+    else:
+        dyn.note = (
+            f"检测到测试设备 {online.serial} 在线；动态执行体将在第二阶段交付，"
+            f"本次未执行 / Test device {online.serial} online; dynamic executor lands in phase 2"
+        )

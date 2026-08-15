@@ -48,6 +48,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--html", default=None, metavar="OUT.html",
                            help="HTML 报告路径（默认以 App 名称命名输出）")
     p_analyze.add_argument("--config", default=None, metavar="config.yaml", help="自定义配置文件")
+    p_analyze.add_argument("--device", default=None, metavar="SERIAL",
+                           help="显式指定 adb 设备（绕过 test_devices 白名单）")
 
     # scan 子命令
     p_scan = sub.add_parser("scan", help="批量扫描目录 / Batch scan a directory")
@@ -64,6 +66,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_dynamic = sub.add_parser("dynamic", help="动态分析 (第二阶段) / Dynamic analysis (phase 2)")
     p_dynamic.add_argument("file", help="APK/AAB 文件路径")
     p_dynamic.add_argument("--config", default=None, metavar="config.yaml", help="自定义配置文件")
+    p_dynamic.add_argument("--device", default=None, metavar="SERIAL",
+                           help="显式指定 adb 设备（绕过 test_devices 白名单）")
 
     return parser
 
@@ -104,9 +108,9 @@ def _make_report(app: AnalyzedApp, config: Config, severity: str, rules: RuleSet
     return report
 
 
-def _attach_dynamic_status(report: Report, config: Config) -> None:
+def _attach_dynamic_status(report: Report, config: Config, explicit_device: str | None = None) -> None:
     """按配置与设备状态更新报告的动态分析标注（第一版不真正执行）"""
-    dm = DeviceManager(config.test_devices)
+    dm = DeviceManager(config.test_devices, explicit_device=explicit_device)
     update_dynamic_status(report, dm, config.dynamic_options)
 
 
@@ -133,7 +137,7 @@ def cmd_analyze(args) -> int:
 
     app = analyze_file(path)
     report = _make_report(app, config, args.severity, rules)
-    _attach_dynamic_status(report, config)
+    _attach_dynamic_status(report, config, getattr(args, "device", None))
 
     console.print_analysis_report(report)
 
@@ -224,8 +228,7 @@ def cmd_dynamic(args) -> int:
     app = analyze_file(path)
     rules = load_rules(config.rules_dir)
     report = _make_report(app, config, "low", rules)
-    dm = DeviceManager(config.test_devices)
-    update_dynamic_status(report, dm, config.dynamic_options)
+    _attach_dynamic_status(report, config, args.device)
 
     console.print_analysis_report(report)
     console._c("提示：动态分析执行体将在第二阶段交付 / Dynamic executor lands in phase 2", "yellow")
