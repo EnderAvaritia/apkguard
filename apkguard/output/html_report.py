@@ -118,6 +118,14 @@ tr.ep-sus td:first-child{color:#fca5a5;font-weight:650}
 .note-box{margin-top:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px 14px;font-size:13px;color:#cbd5e1}
 footer{text-align:center;color:#64748b;font-size:12.5px;padding:18px 0 6px}
 footer .foot-sub{margin-top:4px;color:#475569;font-size:12px}
+.tab-bar{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #334155;margin-bottom:18px;position:sticky;top:0;background:#0f172a;z-index:20;padding-top:8px}
+.tab-btn{background:transparent;border:none;border-bottom:2px solid transparent;color:#94a3b8;font-size:13.5px;padding:9px 14px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:6px;border-radius:8px 8px 0 0;white-space:nowrap}
+.tab-btn:hover{color:#e2e8f0;background:#1e293b}
+.tab-btn.active{color:#38bdf8;border-bottom-color:#38bdf8;font-weight:650}
+.tab-count{background:#334155;color:#cbd5e1;font-size:11px;font-weight:600;padding:0 7px;border-radius:999px}
+.tab-btn.active .tab-count{background:#0ea5e9;color:#fff}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
 @media print{
   body{background:#fff;color:#111;padding:0}
   .card{background:#fff;border-color:#bbb;box-shadow:none;break-inside:avoid}
@@ -126,6 +134,8 @@ footer .foot-sub{margin-top:4px;color:#475569;font-size:12px}
   details.evidence pre{max-height:none;color:#222;background:#f5f5f5}
   .findings-table th,.ep-table th{color:#444}
   footer{color:#555}
+  .tab-bar{display:none}
+  .tab-panel{display:block!important}
 }
 """
 
@@ -184,6 +194,35 @@ _JS = """
       }
     });
   }
+})();
+
+/* --- 标签页 / Tabs（与上方 IIFE 相互独立，避免变量冲突）--- */
+(function () {
+  var tabBtns = document.querySelectorAll('.tab-btn');
+  var tabPanels = document.querySelectorAll('.tab-panel');
+  function activateTab(name) {
+    for (var i = 0; i < tabBtns.length; i++) {
+      var on = tabBtns[i].getAttribute('data-tab') === name;
+      tabBtns[i].classList.toggle('active', on);
+      tabBtns[i].setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+    for (var j = 0; j < tabPanels.length; j++) {
+      tabPanels[j].classList.toggle('active', tabPanels[j].getAttribute('data-tab') === name);
+    }
+  }
+  for (var k = 0; k < tabBtns.length; k++) {
+    tabBtns[k].addEventListener('click', function () {
+      var name = this.getAttribute('data-tab');
+      activateTab(name);
+      if (history.replaceState) { history.replaceState(null, '', '#' + name); }
+    });
+  }
+  var initial = location.hash.replace('#', '');
+  var found = false;
+  for (var m = 0; m < tabBtns.length; m++) {
+    if (tabBtns[m].getAttribute('data-tab') === initial) { found = true; break; }
+  }
+  if (found) { activateTab(initial); }
 })();
 """
 
@@ -591,21 +630,58 @@ def render_html(report: dict) -> str:
     """Render a report dict into a complete self-contained HTML string.
 
     ``report`` 为 ``Report.to_dict()`` 的输出；对缺失/空字段安全，不会抛异常。
+    输出采用标签页布局：头部卡片与风险总览始终可见，其下为粘性标签栏，
+    每个分区（检测发现 / 危险权限 / 网络端点 / 签名信息 / 动态分析 / 解析警告）
+    各自独占一个标签页面板。
     """
     rep = report if isinstance(report, dict) else {}
     app = rep.get("app_info") or {}
     app_name = _text(app.get("app_name"), "未知应用 / Unknown App")
-    sections = [
-        _render_header(rep),
-        _render_risk_card(rep.get("risk") or {}),
-        _render_findings(rep.get("findings") or []),
-        _render_permissions(rep.get("permissions") or {}),
-        _render_endpoints(rep.get("network_endpoints") or []),
-        _render_signature(rep.get("signature") or None),
-        _render_dynamic(rep.get("dynamic") or {}),
-        _render_warnings(rep.get("parse_warnings") or []),
-        _render_footer(rep),
+
+    findings = rep.get("findings") or []
+    dangerous_declared = (rep.get("permissions") or {}).get("dangerous_declared") or []
+    endpoints = rep.get("network_endpoints") or []
+    parse_warnings = rep.get("parse_warnings") or []
+
+    findings_html = _render_findings(findings)
+    permissions_html = _render_permissions(rep.get("permissions") or {})
+    endpoints_html = _render_endpoints(endpoints)
+    signature_html = _render_signature(rep.get("signature") or None)
+    dynamic_html = _render_dynamic(rep.get("dynamic") or {})
+    warnings_html = _render_warnings(parse_warnings)
+
+    # (tab_id, label, count_or_None, section_html)；解析警告为空时整个标签省略
+    tabs: list[tuple[str, str, int | None, str]] = [
+        ("findings", "检测发现 / Findings", len(findings), findings_html),
+        ("permissions", "危险权限 / Permissions", len(dangerous_declared), permissions_html),
+        ("endpoints", "网络端点 / Endpoints", len(endpoints), endpoints_html),
+        ("signature", "签名信息 / Signature", None, signature_html),
+        ("dynamic", "动态分析 / Dynamic", None, dynamic_html),
     ]
+    if warnings_html != "":
+        tabs.append(("warnings", "解析警告 / Warnings", len(parse_warnings), warnings_html))
+
+    tab_buttons: list[str] = []
+    panels: list[str] = []
+    for i, (tab_id, label, count, section_html) in enumerate(tabs):
+        active_cls = " active" if i == 0 else ""
+        selected = "true" if i == 0 else "false"
+        count_html = f'<span class="tab-count">{count}</span>' if count is not None else ""
+        tab_buttons.append(
+            f'<button class="tab-btn{active_cls}" data-tab="{tab_id}" type="button" '
+            f'role="tab" aria-selected="{selected}">{label}{count_html}</button>'
+        )
+        panels.append(
+            f'<div class="tab-panel{active_cls}" data-tab="{tab_id}" role="tabpanel">\n'
+            f"{section_html}\n</div>"
+        )
+
+    tab_bar = (
+        '<nav class="tab-bar" role="tablist" aria-label="报告分区 / Report sections">\n'
+        + "\n".join(tab_buttons)
+        + "\n</nav>"
+    )
+
     page_title = f"{app_name} · apkguard 静态分析报告 / Static Analysis Report"
     return (
         '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n'
@@ -614,7 +690,13 @@ def render_html(report: dict) -> str:
         f"<title>{_esc(page_title)}</title>\n"
         f"<style>{_CSS}</style>\n"
         "</head>\n<body>\n"
-        f'<div class="wrap">\n{"".join(sections)}\n</div>\n'
+        f'<div class="wrap">\n'
+        f"{_render_header(rep)}\n"
+        f"{_render_risk_card(rep.get('risk') or {})}\n"
+        f"{tab_bar}\n"
+        f"{''.join(panels)}\n"
+        f"{_render_footer(rep)}\n"
+        "</div>\n"
         f"<script>{_JS}</script>\n"
         "</body>\n</html>"
     )
