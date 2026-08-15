@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Optional
 
 from androguard.core.apk import APK
-from androguard.core.analysis.analysis import Analysis
 from androguard.core.dex import DEX
 
 from apkguard.engine.models import AnalyzedApp, SignatureInfo
@@ -286,6 +285,33 @@ def _signature_schemes(apk: APK) -> list[str]:
     return schemes or ["v1"]
 
 
+def _collect_method_ids(dexs: list[DEX], app: AnalyzedApp) -> None:
+    """从 dex 方法引用表（method_ids）收集被调用方法全名（Smali 风格）。
+
+    为什么不用 Analysis.create_xref()：
+      1. 内存：xref 构建完整调用图，内存占用是 dex 的 10 倍以上，
+         186MB 大 APK 单文件分析即可吃掉数 GB；method_ids 直接读引用表，
+         内存占用低一个数量级。
+      2. 格式：xref 的 full_name 是空格风格（'Lclass; name (desc)'），
+         与 YAML api 规则/检测器的 Smali 风格（'Lclass;->name(desc)'）不匹配，
+         导致 api 规则在真实样本上失配（0 命中）。method_ids 拼接 Smali 风格
+         正好匹配，顺带修复该隐藏 bug。
+
+    method_ids 表包含 dex 中所有被引用的方法（含 android.jar 外部 API），
+    覆盖面与 xref 的"被调用方法"集合一致。
+    """
+    for dex in dexs:
+        try:
+            for m in dex.get_methods_id_item().gets():
+                cls = m.get_class_name()
+                name = m.get_name()
+                desc = m.get_real_descriptor()
+                if cls and name:
+                    app.called_methods.add(f"{cls}->{name}{desc}")
+        except Exception:
+            continue
+
+
 def _collect_code_info(apk: APK, app: AnalyzedApp) -> None:
     """收集 called_methods / strings / classes"""
     dexs: list[DEX] = []
@@ -298,25 +324,8 @@ def _collect_code_info(apk: APK, app: AnalyzedApp) -> None:
         app.parse_warnings.append("未找到可解析的 dex / No parseable dex found")
         return
 
-    # Analysis 构造：4.1.4 接受单个 DEX，多个需 add()
-    analysis = Analysis(dexs[0])
-    for extra in dexs[1:]:
-        analysis.add(extra)
-    analysis.create_xref()
-
-    # 被调用的方法全名（供 api 规则匹配）
-    for method in analysis.get_methods():
-        try:
-            for _cls, callee, _offset in method.get_xref_to():
-                app.called_methods.add(callee.full_name)
-        except Exception:
-            continue
-    # 也加入方法自身的声明名，防止只被外部调用的情况
-    for method in analysis.get_methods():
-        try:
-            app.called_methods.add(method.full_name)
-        except Exception:
-            continue
+    # 方法引用表（轻量，不建 xref 调用图）
+    _collect_method_ids(dexs, app)
 
     # 字符串池
     for dex in dexs:
@@ -386,14 +395,7 @@ def _analyze_aab(path: Path) -> AnalyzedApp:
         if not dexs:
             warnings.append("AAB 中未找到可解析的 dex / No parseable dex in AAB")
         else:
-            analysis = Analysis(dexs)
-            for method in analysis.get_methods():
-                try:
-                    for _cls, callee, _offset in method.get_xref_to():
-                        app.called_methods.add(callee.full_name)
-                    app.called_methods.add(method.full_name)
-                except Exception:
-                    continue
+            _collect_method_ids(dexs, app)
             for dex in dexs:
                 for s, _offset in dex.get_strings():
                     app.strings.add(s)
