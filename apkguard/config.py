@@ -13,7 +13,8 @@ import yaml
 # 项目根目录（apkguard/ 的上一级）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
-DEFAULT_RULES_DIR = PROJECT_ROOT / "rules"
+# 规则随包分发：apkguard/rules/
+DEFAULT_RULES_DIR = Path(__file__).resolve().parent / "rules"
 
 DEFAULT_SEVERITY_PROFILES: dict[str, dict[str, int]] = {
     "low": {"clean_below": 4, "malicious_at": 8},
@@ -70,7 +71,7 @@ class Config:
         path = self.raw.get("rules_dir", "rules")
         p = Path(path)
         if not p.is_absolute():
-            p = PROJECT_ROOT / p
+            p = DEFAULT_RULES_DIR
         return p
 
     def set_rules_dir(self, path: str | Path) -> None:

@@ -126,7 +126,10 @@ def _score_and_features(endpoint: str, kind: str) -> tuple[int, list[str]]:
             features.append("硬编码公网 IP (hardcoded public IP)")
 
     elif kind == "domain":
-        features.extend(_dga_features(endpoint))
+        dga_features = _dga_features(endpoint)
+        if dga_features:
+            features.extend(dga_features)
+            score += 2  # DGA 特征（长数字串/高熵/深层子域）
         if endpoint.startswith("xn--"):
             features.append("IDN punycode 伪装 (IDN punycode)")
             score += 3

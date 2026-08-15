@@ -212,6 +212,12 @@ def cmd_dynamic(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 控制台默认 GBK，强制 UTF-8 输出保证中文正常（建议使用 Windows Terminal）
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = _build_parser()
     args = parser.parse_args(argv)
     handlers = {

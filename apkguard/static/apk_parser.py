@@ -218,7 +218,11 @@ def _collect_code_info(apk: APK, app: AnalyzedApp) -> None:
         app.parse_warnings.append("未找到可解析的 dex / No parseable dex found")
         return
 
-    analysis = Analysis(dexs)
+    # Analysis 构造：4.1.4 接受单个 DEX，多个需 add()
+    analysis = Analysis(dexs[0])
+    for extra in dexs[1:]:
+        analysis.add(extra)
+    analysis.create_xref()
 
     # 被调用的方法全名（供 api 规则匹配）
     for method in analysis.get_methods():
@@ -237,7 +241,7 @@ def _collect_code_info(apk: APK, app: AnalyzedApp) -> None:
     # 字符串池
     for dex in dexs:
         try:
-            for s, _offset in dex.get_strings():
+            for s in dex.get_strings():
                 app.strings.add(s)
         except Exception:
             continue
