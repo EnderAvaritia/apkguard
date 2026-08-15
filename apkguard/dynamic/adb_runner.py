@@ -21,12 +21,18 @@ class AdbRunner:
         self._adb_bin = adb_bin
 
     def run(self, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
-        """执行 `adb -s <serial> <args>`；异常（找不到 adb/超时/OS 错误）转为 rc=1 结果"""
+        """执行 `adb -s <serial> <args>`；异常（找不到 adb/超时/OS 错误）转为 rc=1 结果
+
+        adb 输出为 UTF-8；Windows 下必须显式指定编码（text=True 默认用系统代码页
+        GBK，遇 UTF-8 多字节会 UnicodeDecodeError），errors=replace 兜底无效字节。
+        """
         try:
             return subprocess.run(
                 [self._adb_bin, "-s", self.serial, *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:

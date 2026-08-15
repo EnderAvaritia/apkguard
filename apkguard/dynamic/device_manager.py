@@ -97,6 +97,8 @@ class DeviceManager:
                 ["adb", *args],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",  # adb 输出为 UTF-8；Windows 系统代码页 GBK 会解码失败
+                errors="replace",
                 timeout=15,
             )
             return result.stdout.strip()
