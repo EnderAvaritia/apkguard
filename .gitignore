@@ -34,6 +34,8 @@ Thumbs.db
 
 # 配置文件中的本地覆盖
 config.local.yaml
+# 本地私有配置（含 test_devices 等本机信息，不进版本控制；模板见 config.example）
+config.yaml
 
 # ���߻Ự/����Ŀ¼
 .codegraph/

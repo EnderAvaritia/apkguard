@@ -80,6 +80,16 @@ python -m venv .venv
 
 ## 配置 / Configuration
 
+首次使用先复制模板为本地私有配置：
+
+```bash
+copy config.example config.yaml    # Windows
+cp config.example config.yaml      # Linux/macOS
+```
+
+> `config.yaml` 已被 `.gitignore` 忽略——它包含 `test_devices`（设备序列号）等本机私有信息，
+> 不进版本控制；模板与全部可配置项见 `config.example`。
+
 见 `config.yaml` 注释说明。关键项：
 
 - `severity_profiles`：三档阈值
