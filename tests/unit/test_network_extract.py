@@ -101,6 +101,32 @@ class TestEndpointExtraction:
             f"OID 变体不应被识别为 IP: {[e.endpoint for e in endpoints]}"
         )
 
+    def test_mac_address_not_flagged_as_ip(self):
+        """MAC 地址（蓝牙/WiFi 随机 MAC 常见值）不是 IP，不应被当作 C2 端点"""
+        endpoints = extract_network_endpoints(
+            {"02:00:00:00:00:00", "00:00:00:00:00:00", "aa:bb:cc:dd:ee:ff"}
+        )
+        assert not any(e.kind == "ip" for e in endpoints), (
+            f"MAC 不应被识别为 IP: {[e.endpoint for e in endpoints]}"
+        )
+
+    def test_time_string_not_flagged_as_ip(self):
+        """时间串（HH:MM:SS）不是 IP，不应被当作 C2 端点"""
+        endpoints = extract_network_endpoints({"02:18:46", "23:59:59", "9:30:05"})
+        assert not any(e.kind == "ip" for e in endpoints), (
+            f"时间串不应被识别为 IP: {[e.endpoint for e in endpoints]}"
+        )
+
+    def test_real_ipv6_still_extracted(self):
+        """合法 IPv6（8 组全写）不受 MAC/时间过滤误伤"""
+        endpoints = extract_network_endpoints(
+            {"fe80:0:0:0:0:0:0:1", "2001:db8:0:0:0:0:0:1"}
+        )
+        ips = [e for e in endpoints if e.kind == "ip"]
+        assert ips, "合法 IPv6 应被提取"
+        # 链路本地/文档地址按内网处理（+2），而不是被当作公网 IP 或直接过滤
+        assert all(e.score == 2 for e in ips)
+
     def test_url_with_standard_port_no_flag(self):
         endpoints = extract_network_endpoints({"https://api.example.com:443/v1"})
         urls = [e for e in endpoints if e.kind == "url"]

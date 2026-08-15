@@ -160,6 +160,18 @@ def _is_oid_like(ip_str: str) -> bool:
     return first <= 5
 
 
+_MAC_RE = re.compile(r"[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}")
+_TIME_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}")
+
+
+def _is_mac_or_time(ip_str: str) -> bool:
+    """MAC 地址（6 组两位十六进制，如 02:00:00:00:00:00）或时间串
+    （HH:MM:SS，如 02:18:46）与 IPv6 同形，但绝不可能是合法 IPv6
+    （IPv6 需要 8 组或 :: 压缩），直接排除，避免被误报为"硬编码公网 IP"。
+    """
+    return bool(_MAC_RE.fullmatch(ip_str)) or bool(_TIME_RE.fullmatch(ip_str))
+
+
 def _dga_features(domain: str) -> list[str]:
     """检测 DGA（域名生成算法）特征"""
     features: list[str] = []
@@ -290,6 +302,9 @@ def extract_network_endpoints(
             return
         # OID 伪 IP 过滤：证书/加密库的数字标识符不是网络端点
         if kind == "ip" and _is_oid_like(endpoint):
+            return
+        # MAC 地址 / 时间串过滤：与 IPv6 同形但不是 IP（蓝牙/WiFi MAC、HH:MM:SS）
+        if kind == "ip" and _is_mac_or_time(endpoint):
             return
         # Java 类名过滤：包路径与域名同形
         if kind == "domain":
