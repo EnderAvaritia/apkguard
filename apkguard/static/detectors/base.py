@@ -9,10 +9,13 @@
 """
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
 from apkguard.engine.models import AnalyzedApp, Finding
 from apkguard.engine.rule_engine import RuleSet
+
+logger = logging.getLogger("apkguard.detectors")
 
 
 class BaseDetector(ABC):
@@ -83,9 +86,15 @@ def get_detectors() -> list[BaseDetector]:
 
 def run_all_detectors(app: AnalyzedApp, rules: RuleSet) -> list[Finding]:
     """运行全部检测器，聚合所有 findings"""
+    detectors = get_detectors()
+    total = len(detectors)
+    logger.info(f"Running {total} detectors")
     findings: list[Finding] = []
-    for detector in get_detectors():
+    for i, detector in enumerate(detectors, 1):
         try:
+            logger.info(
+                f"  detector {i}/{total}: {detector.display_name_en} ({detector.detector_id})"
+            )
             findings.extend(detector.detect(app, rules))
         except Exception as e:
             # 单个检测器失败不应阻断整体分析
@@ -99,4 +108,5 @@ def run_all_detectors(app: AnalyzedApp, rules: RuleSet) -> list[Finding]:
                     weight=0,
                 )
             )
+    logger.info(f"Detectors done: {len(findings)} findings")
     return findings

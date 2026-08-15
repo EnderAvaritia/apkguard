@@ -221,6 +221,7 @@ def _write_report_files(
 
 
 def cmd_analyze(args) -> int:
+    _setup_logging()
     config = _resolve_config(args)
     rules = load_rules(config.rules_dir)
     path = Path(args.file)
@@ -310,6 +311,7 @@ def _scan_worker(
     参数全为基本类型/字符串；返回 (路径, Report.to_dict())。
     失败抛异常，由调用方收集到 errors 列表。
     """
+    _suppress_androguard_logs()  # 子进程各自压制，防 20 万行/文件刷屏
     from apkguard.output.json_report import write_json_report
 
     config = Config(Path(config_path) if config_path else None)
@@ -329,6 +331,7 @@ def _scan_worker(
 
 
 def cmd_scan(args) -> int:
+    _setup_logging()
     config = _resolve_config(args)
     rules = load_rules(config.rules_dir)
     root = Path(args.dir)
@@ -392,11 +395,16 @@ def cmd_scan(args) -> int:
             ): p
             for p in files
         }
+        done = 0
         for future in as_completed(futures):
             try:
                 results.append(future.result())
             except Exception as e:
                 errors.append(str(e))
+            done += 1
+            logging.getLogger("apkguard").info(
+                f"scan progress: {done}/{len(files)} files done"
+            )
 
     console.print_scan_summary(results, errors)
     # 自动输出批量汇总报告（JSON + HTML，落盘当前目录）——与 analyze/dynamic 共用写盘助手
@@ -410,19 +418,13 @@ def cmd_scan(args) -> int:
     return 0
 
 
-def _setup_dynamic_logging() -> None:
-    """动态分析过程日志配置（幂等）：
+def _suppress_androguard_logs() -> None:
+    """压制 androguard（loguru）DEBUG/INFO 刷屏——只保留 WARNING 及以上。
 
-    - apkguard.dynamic → INFO 实时输出执行步骤（stderr，与报告 stdout 分离）
-    - 压制 androguard（loguru）DEBUG 刷屏——只保留 WARNING 及以上
+    androguard 在 APK()/DEX() 解析时会经 loguru 输出大量调试日志
+    （实测 80MB 样本可刷 20 万行），且只在当前进程生效：
+    scan 的每个 worker 子进程都必须各自调用（spawn 不继承全局状态）。
     """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stderr,
-        force=True,
-    )
     try:
         from loguru import logger as _loguru
 
@@ -431,8 +433,24 @@ def _setup_dynamic_logging() -> None:
         pass  # 无 loguru（非 Windows/精简环境）无需压制
 
 
+def _setup_logging() -> None:
+    """统一运行日志配置（幂等）：
+
+    - 全部命令 → INFO 实时输出执行步骤到 stderr（与报告 stdout 分离）
+    - 压制 androguard（loguru）刷屏
+    """
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+        force=True,
+    )
+    _suppress_androguard_logs()
+
+
 def cmd_dynamic(args) -> int:
-    _setup_dynamic_logging()
+    _setup_logging()
     config = _resolve_config(args)
     path = Path(args.file)
     if not path.exists():

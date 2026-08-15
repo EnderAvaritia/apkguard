@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import zipfile
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from androguard.core.apk import APK
 from androguard.core.dex import DEX
 
 from apkguard.engine.models import AnalyzedApp, SignatureInfo
+
+logger = logging.getLogger("apkguard.static")
 
 # Android 危险权限（dangerous 级别）——用于 filtering 展示
 DANGEROUS_PERMISSIONS: set[str] = {
@@ -151,7 +154,10 @@ def _extract_exported_activities(apk: APK, package: Optional[str], target_sdk: i
 
 def _analyze_apk(path: Path) -> AnalyzedApp:
     warnings: list[str] = []
+    size_mb = path.stat().st_size / 1048576
+    logger.info(f"Parsing APK: {path.name} ({size_mb:.1f} MB)")
     apk = APK(str(path))
+    logger.info("Manifest parsed")
     app = AnalyzedApp(
         file_path=str(path),
         file_format="APK",
@@ -315,14 +321,18 @@ def _collect_method_ids(dexs: list[DEX], app: AnalyzedApp) -> None:
 def _collect_code_info(apk: APK, app: AnalyzedApp) -> None:
     """收集 called_methods / strings / classes"""
     dexs: list[DEX] = []
-    for raw in apk.get_all_dex():
+    all_raw = list(apk.get_all_dex())  # generator → list（需要 len 做进度分母）
+    total = len(all_raw)
+    for i, raw in enumerate(all_raw, 1):
         try:
+            logger.info(f"Parsing dex {i}/{total} ({len(raw) / 1048576:.1f} MB)")
             dexs.append(DEX(raw))
         except Exception:
             continue
     if not dexs:
         app.parse_warnings.append("未找到可解析的 dex / No parseable dex found")
         return
+    logger.info(f"Extracting method refs / strings / classes from {len(dexs)} dex")
 
     # 方法引用表（轻量，不建 xref 调用图）
     _collect_method_ids(dexs, app)
@@ -362,6 +372,7 @@ def _analyze_aab(path: Path) -> AnalyzedApp:
         "AAB 支持为实验性：Manifest 采用启发式解析，待真实样本验证 / "
         "AAB support is experimental: heuristic manifest parsing pending real-sample validation"
     ]
+    logger.info(f"Parsing AAB: {path.name} ({path.stat().st_size / 1048576:.1f} MB)")
     app = AnalyzedApp(
         file_path=str(path),
         file_format="AAB",
@@ -381,20 +392,24 @@ def _analyze_aab(path: Path) -> AnalyzedApp:
             app.dangerous_permissions = sorted(
                 p for p in app.declared_permissions if p in DANGEROUS_PERMISSIONS
             )
+            logger.info(f"Manifest heuristic parse done: package={app.package or '?'}")
 
         # 2) dex 抽取（代码分析完整可用）
         dex_names = sorted(
             n for n in names if n.startswith("base/dex/") and n.endswith(".dex")
         )
+        total = len(dex_names)
         dexs: list[DEX] = []
-        for dex_name in dex_names:
+        for i, dex_name in enumerate(dex_names, 1):
             try:
+                logger.info(f"Parsing dex {i}/{total}: {dex_name}")
                 dexs.append(DEX(zf.read(dex_name)))
             except Exception:
                 continue
         if not dexs:
             warnings.append("AAB 中未找到可解析的 dex / No parseable dex in AAB")
         else:
+            logger.info(f"Extracting method refs / strings / classes from {len(dexs)} dex")
             _collect_method_ids(dexs, app)
             for dex in dexs:
                 for s, _offset in dex.get_strings():
