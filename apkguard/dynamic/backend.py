@@ -190,6 +190,7 @@ def _apply_execution_result(report: Report, result: dict) -> None:
         dyn.decoy_installed = result.get("decoy_installed", False)
         dyn.cleanup_ok = result.get("cleanup_ok", True)
         dyn.kept_installed = result.get("kept_installed", False)
+        dyn.manual_login_confirmed = result.get("manual_login_confirmed")
         dyn.findings = [
             {"type": "note", "message": n} for n in result.get("notes", [])
         ]

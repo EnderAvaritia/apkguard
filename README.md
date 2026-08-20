@@ -122,8 +122,8 @@ cp config.example config.yaml      # Linux/macOS
 - `scan_workers`：批量扫描并发数（0 = 自动探测 CPU 核数，可被 `--workers` 覆盖）
 - `test_devices`：**测试设备白名单**（动态分析安全铁律，见下）
 - `dynamic`：动态分析参数（初始 5 分钟 / 活跃延长至 15 分钟 / 静默 45 秒收网 /
-  代理抓包 / Frida / 诱饵数据 / 同包名处理等，含 `replace_existing` 与
-  `cleanup_uninstall`）
+  代理抓包 / Frida / 诱饵数据 / 同包名处理 / 手动登录门等，含 `replace_existing`、
+  `cleanup_uninstall` 与 `manual_login`）
 - `enhancements`：可选增强（hash 比对、威胁情报），**默认全部关闭**
 
 ## 规则扩展 / Adding Rules
@@ -167,7 +167,7 @@ rules:
 | 后端 | 可插拔：本地 adb 模拟器 / 远程真机 / 第三方沙箱 API（可选，需显式配置） |
 | 行为采集 | 网络流量抓包（必做，C2 核心证据）+ Frida hook 敏感 API（有则全量，无则降级系统层） |
 | 诱饵数据 | 预置通讯录 + 短信 + 通话记录（`dynamic.fake_gps` 配置项模拟位置） |
-| 交互 | 随机唤起 activity（默认仅 exported / 带 intent-filter，防误触内部组件）+ monkey 随机点击兜底；权限弹窗由 `install -g` 预授权 + `pm grant` 兜底规避 |
+| 交互 | 随机唤起 activity（默认仅 exported / 带 intent-filter，防误触内部组件）+ monkey 随机点击兜底；权限弹窗由 `install -g` 预授权 + `pm grant` 兜底规避；需登录的样本用 `manual_login: true` 启动后暂停，等操作者手动登录按回车（启动键）继续 |
 | 反沙箱 | 不硬刚；探测环境行为（模拟器/反调试/root）本身作为恶意信号上报 |
 | 智能终止 | 初始 5 分钟 / 活跃延长至多 15 分钟 / 静默 45 秒提前收网 |
 | 同包名预检 | 安装前检测设备是否已有同包名应用：**同版本 → 跳过安装直接测试**；版本不同/未知默认拒绝安装（防误覆盖），`replace_existing: true` 才先卸载（连数据清除）再装；`cleanup_uninstall: false` 测完保留不卸载 |
@@ -202,6 +202,14 @@ rules:
   **同包名正式版应用**（同版本直接测试）不想跑完被卸载，可设
   `cleanup_uninstall: false` 保留（报告标注 `kept_installed: true` 审计；
   代理仍无条件清除）。
+- **手动登录门**（`manual_login: true`）：部分 App 需要登录才能展现真实行为，
+  自动化交互（activity 驱动 / monkey）无法替操作者输入账号密码。启动 App 后
+  暂停自动化交互，提示操作者在设备上手动登录，完成后按**回车（启动键）**继续；
+  等待超时（`manual_login_wait`，默认 180s）自动继续不挂死（stdin 关闭时同样
+  立即继续）。登录耗时**不计入智能终止预算**（交互时钟在登录后重新计时），
+  避免把 initial/max_timeout 耗尽压缩自动化窗口；登录期间的代理抓包正常采集
+  （登录流量同样计入证据）。报告标注 `manual_login_confirmed`（未启用/已确认/超时）。
+  CLI 可用 `--manual-login` 临时开启。
 - **同包名预检**：安装前检查设备上是否已存在同包名应用。默认
   `replace_existing: false` 拒绝安装（防误覆盖设备已有应用）；设为 `true` 则先
   卸载（连用户数据一并清除）再安装，保证干净环境。

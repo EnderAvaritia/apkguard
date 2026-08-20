@@ -568,6 +568,13 @@ def _render_dynamic(dyn: dict) -> str:
         frida = "是 / Yes" if dyn.get("frida_hooked") else "否 / No"
         decoy = "已注入 / Injected" if dyn.get("decoy_installed") else "未注入 / None"
         cleanup = "完成 / Done" if dyn.get("cleanup_ok") else "失败！/ FAILED"
+        manual_login = dyn.get("manual_login_confirmed")
+        if manual_login is None:
+            manual_login_text = "未启用 / Not used"
+        elif manual_login:
+            manual_login_text = "已确认 / Confirmed"
+        else:
+            manual_login_text = "等待超时 / Timed out"
         endpoints = dyn.get("traffic_endpoints") or []
         ep_items = "".join(
             f"<li>{_esc(ep)}</li>" for ep in endpoints[:20]
@@ -583,6 +590,7 @@ def _render_dynamic(dyn: dict) -> str:
     {_kv("运行时长 / Duration", duration)}
     {_kv("Frida Hook", frida)}
     {_kv("诱饵数据 / Decoy", decoy)}
+    {_kv("手动登录 / Manual login", manual_login_text)}
     {_kv("跑后清理 / Cleanup", f'<span class="{"ok" if dyn.get("cleanup_ok") else "danger"}">{_esc(cleanup)}</span>')}
   </div>
   {ep_block}"""

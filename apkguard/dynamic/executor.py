@@ -15,10 +15,11 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from apkguard.dynamic.adb_runner import AdbRunner
 from apkguard.dynamic.decoy import install_decoy_data
@@ -82,6 +83,38 @@ def _exclude_baseline(endpoints: list[str], baseline: list[str]) -> list[str]:
     return [e for e in endpoints if e not in baseline_set]
 
 
+def wait_for_login(timeout: float, reader: Callable[[], str] = input) -> bool:
+    """等待操作者手动登录后按回车（启动键）继续。
+
+    应对需要登录才能展现真实行为的样本：自动化交互（activity 驱动 / monkey）
+    无法替操作者输入账号密码，这里暂停等待人工登录完成。
+
+    - reader 可注入（默认 input()），便于单测：收到任何输入即视为确认
+    - 超时 / EOF（stdin 关闭，如 CI 管道）→ 返回 False，调用方继续流程，不挂死
+    """
+    print(
+        f"\n>>> 样本已启动。如需登录请在设备上手动完成，登录后按 回车 继续"
+        f"（{timeout:.0f}s 超时自动继续）<<<\n"
+        f">>> App launched. Log in manually on device if required, "
+        f"then press ENTER to continue (auto-continues after {timeout:.0f}s) <<<",
+        file=sys.stderr,
+        flush=True,
+    )
+    holder: dict[str, bool] = {}
+
+    def _read() -> None:
+        try:
+            reader()
+            holder["confirmed"] = True
+        except (EOFError, KeyboardInterrupt):
+            holder["confirmed"] = False
+
+    thread = threading.Thread(target=_read, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    return holder.get("confirmed", False)
+
+
 class DynamicExecutor:
     """针对单台准入设备的一次动态分析"""
 
@@ -133,6 +166,9 @@ class DynamicExecutor:
         # cleanup_uninstall: false = 保留设备上已安装的应用/样本不卸载（如测试设备
         # 上已有同包名正式版应用，同版本直接测试后不想被删）。代理始终清除。
         keep_installed = not bool(self._opt("cleanup_uninstall", True))
+        # 手动登录门三态：None=未启用；True=已确认（回车）；False=等待超时自动继续
+        manual_login_confirmed: Optional[bool] = None
+        interact_started = started
 
         try:
             # 0) 安装前预检：设备上是否已存在同包名应用
@@ -237,7 +273,27 @@ class DynamicExecutor:
             if not launched:
                 self._note(notes, "launch failed (best-effort continue)")
 
-            # 5.5) 随机唤起 activity（强制执行更多代码路径）
+            # 5.5) 手动登录门（manual_login: true）——应对需要登录才能展现真实行为的样本。
+            #      自动化交互（activity 驱动 / monkey）无法替操作者输入账号密码；
+            #      此处暂停并提示操作者在设备上手动登录，按回车（启动键）后继续。
+            #      超时 / stdin 关闭（CI 管道）自动继续，不挂死流程。
+            #      登录等待不计入智能终止预算：登录耗时属于操作者时间，跑完重新计时，
+            #      避免把 initial_timeout / max_timeout 耗尽导致自动化交互窗口被压缩。
+            if self._opt("manual_login", False):
+                wait_seconds = max(1.0, float(self._opt("manual_login_wait", 180)))
+                manual_login_confirmed = wait_for_login(wait_seconds)
+                if manual_login_confirmed:
+                    self._note(notes,
+                        "manual login confirmed (ENTER) / 已确认手动登录（按回车）"
+                    )
+                else:
+                    self._note(notes,
+                        f"manual login wait timed out ({wait_seconds:.0f}s); continuing / "
+                        f"手动登录等待超时（{wait_seconds:.0f}s），继续流程"
+                    )
+                interact_started = time.time()  # 登录耗时不计入交互预算
+
+            # 5.6) 随机唤起 activity（强制执行更多代码路径）
             #      默认只唤起"可被外部唤起"的（exported=true / 带 intent-filter），
             #      避免误触发非导出内部组件的副作用路径或缺 extras 的噪音崩溃；
             #      显式配置 interact_hidden_activities: true 才随机唤起全部。
@@ -274,8 +330,8 @@ class DynamicExecutor:
             elif use_frida:
                 self._note(notes, "frida unavailable (system-level collection only)")
 
-            # 7) 交互 + 智能终止轮询
-            self._interact_and_wait(package, capture, started, notes)
+            # 7) 交互 + 智能终止轮询（manual_login 时用登录后的时钟重新计时）
+            self._interact_and_wait(package, capture, interact_started, notes)
 
             # 8) 收尾采集
             if frida_holder.get("result") is not None:
@@ -340,6 +396,7 @@ class DynamicExecutor:
             "cleanup_ok": cleanup_ok,
             "kept_installed": keep_installed,
             "granted_permissions": granted,
+            "manual_login_confirmed": manual_login_confirmed,
         }
 
     # ---- 交互与智能终止 ----

@@ -120,6 +120,9 @@ class DynamicStatus:
     decoy_installed: bool = False  # 诱饵数据是否注入成功
     cleanup_ok: bool = True  # 跑后清理是否完成（安全铁律 3）
     kept_installed: bool = False  # cleanup_uninstall=false 时保留设备应用不卸载（审计标注）
+    # 手动登录门（manual_login）：None=未启用；True=操作者已按回车确认登录；
+    # False=等待超时自动继续。用于需要登录才能展现真实行为的样本。
+    manual_login_confirmed: Optional[bool] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

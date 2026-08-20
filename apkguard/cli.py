@@ -79,6 +79,9 @@ def _build_parser() -> argparse.ArgumentParser:
                            help="显式指定 adb 设备（绕过 test_devices 白名单）")
     p_dynamic.add_argument("--no-static", action="store_true",
                            help="跳过静态检测与打分，仅解析包名/权限后直接动态分析")
+    p_dynamic.add_argument("--manual-login", action="store_true",
+                           help="启动 App 后暂停自动化交互，等待手动登录（设备上登录后按回车继续），"
+                                "应对需要登录的样本（等价 dynamic.manual_login: true）")
     p_dynamic.add_argument("--json", default=None, metavar="OUT.json",
                            help="JSON 报告路径（默认以输入文件名命名输出）")
     p_dynamic.add_argument("--html", default=None, metavar="OUT.html",
@@ -469,8 +472,13 @@ def cmd_dynamic(args) -> int:
         )
     dm = DeviceManager(config.test_devices, explicit_device=args.device)
 
+    # --manual-login CLI 参数覆盖 config.yaml 的 dynamic.manual_login（便于临时开启）
+    dynamic_options = dict(config.dynamic_options)
+    if getattr(args, "manual_login", False):
+        dynamic_options["manual_login"] = True
+
     if config.dynamic_enabled:
-        result = run_dynamic_analysis(report, dm, config.dynamic_options, path, app)
+        result = run_dynamic_analysis(report, dm, dynamic_options, path, app)
         if not result.get("executed"):
             console._c(
                 "提示：动态分析预检未通过，仅做状态标注（见报告 Dynamic 部分）/ "
@@ -478,7 +486,7 @@ def cmd_dynamic(args) -> int:
                 "yellow",
             )
     else:
-        update_dynamic_status(report, dm, config.dynamic_options)
+        update_dynamic_status(report, dm, dynamic_options)
         console._c(
             "提示：动态分析开关未开启（config.yaml: dynamic.enabled）。开启后本命令将真正"
             "在测试设备上安装运行样本 / Dynamic analysis disabled in config.yaml",

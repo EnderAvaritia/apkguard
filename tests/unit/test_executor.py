@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from apkguard.dynamic.executor import DynamicExecutor, should_stop  # noqa: E402
+from apkguard.dynamic.executor import DynamicExecutor, should_stop, wait_for_login  # noqa: E402
 
 
 class FakeRunner:
@@ -409,3 +409,83 @@ class TestExecutorRun:
         # 清理（安全铁律 3）成功也记录
         assert any("uninstalled" in m for m in messages)
         assert any("proxy reset" in m for m in messages)
+
+
+class TestWaitForLogin:
+    """手动登录门（启动键）：等待操作者回车确认"""
+
+    def test_enter_confirms(self):
+        """reader 返回输入（回车）→ 确认登录"""
+        assert wait_for_login(timeout=5, reader=lambda: "y") is True
+
+    def test_timeout_returns_false(self):
+        """reader 阻塞超过 timeout → 超时自动继续（不挂死）"""
+        import time as _time
+
+        def _slow():
+            _time.sleep(10)
+
+        started = _time.time()
+        assert wait_for_login(timeout=0.2, reader=_slow) is False
+        assert _time.time() - started < 5  # 未等待完整 10s
+
+    def test_eof_returns_false(self):
+        """stdin 关闭（EOF，如 CI 管道）→ 立即返回 False 继续流程"""
+        def _eof():
+            raise EOFError
+
+        assert wait_for_login(timeout=5, reader=_eof) is False
+
+
+class TestExecutorManualLogin:
+    """manual_login 门集成：启动 App 后暂停等待回车，再进入自动化交互"""
+
+    def test_manual_login_confirmed_then_interaction(self, monkeypatch):
+        """操作者回车确认 → 记录确认日志，随后正常进入 activity 驱动 + 交互"""
+        monkeypatch.setattr(
+            "apkguard.dynamic.executor.wait_for_login",
+            lambda timeout: True,  # 模拟操作者按回车
+        )
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options(manual_login=True, manual_login_wait=30))
+        result = ex.run(
+            Path("sample.apk"),
+            "com.x",
+            [],
+            activities=["com.x.A"],
+            exported_activities=["com.x.A"],
+        )
+        assert result["status"] == "executed"
+        assert result["manual_login_confirmed"] is True
+        assert any("manual login confirmed" in n for n in result["notes"])
+        # 确认后仍进入自动化交互（activity 驱动正常执行）
+        assert any(c[0] == "start_activity" for c in runner.calls)
+
+    def test_manual_login_timeout_continues(self, monkeypatch):
+        """等待超时（未收到回车）→ 自动继续流程，不阻塞"""
+        monkeypatch.setattr(
+            "apkguard.dynamic.executor.wait_for_login",
+            lambda timeout: False,  # 模拟超时
+        )
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options(manual_login=True, manual_login_wait=1))
+        result = ex.run(Path("sample.apk"), "com.x", [])
+        assert result["status"] == "executed"
+        assert result["manual_login_confirmed"] is False
+        assert any("timed out" in n for n in result["notes"])
+
+    def test_manual_login_disabled_skips_wait(self, monkeypatch):
+        """manual_login 默认关闭 → 不等待，直接进入交互，状态为 None（未启用）"""
+        calls = []
+
+        def _fake(timeout):
+            calls.append(timeout)
+            return True
+
+        monkeypatch.setattr("apkguard.dynamic.executor.wait_for_login", _fake)
+        runner = FakeRunner()
+        ex = DynamicExecutor(runner, make_options())
+        result = ex.run(Path("sample.apk"), "com.x", [])
+        assert result["status"] == "executed"
+        assert calls == []  # 未被调用
+        assert result["manual_login_confirmed"] is None  # 未启用 → 保持默认 None
